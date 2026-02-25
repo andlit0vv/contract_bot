@@ -28,6 +28,7 @@ class ContractData(BaseModel):
     customer_bik: str
     customer_correspondent_account: str
     customer_settlement_account: str
+    customer_kpp: str = "Не указано"
 
     contractor_type: str
     contractor_company_name: str
@@ -141,8 +142,18 @@ def inflect_fio_case(full_name: str, case: str) -> str:
     return " ".join(inflected)
 
 
+def to_initials(full_name: str) -> str:
+    parts = [part for part in full_name.split() if part]
+    if not parts:
+        return ""
+    surname = parts[0]
+    initials = "".join(f"{p[0]}." for p in parts[1:] if p)
+    return f"{surname} {initials}".strip()
+
+
 def build_context(payload: dict) -> dict:
     fio = payload.get("contractor_representative_name", "")
+    customer_fio = payload.get("customer_representative_name", "")
     project_description = payload.get("project_description", "")
     project_points = [item.strip(" -\t") for item in project_description.split(";") if item.strip()]
     if not project_points and project_description.strip():
@@ -150,20 +161,25 @@ def build_context(payload: dict) -> dict:
     if not project_points:
         project_points = ["Объем работ уточняется в техническом задании."]
 
+    contractor_intro = f"{payload.get('contractor_type', '')} {fio}".strip()
+    if payload.get("contractor_type") == "ИП":
+        contractor_intro = f"ИП {to_initials(fio)}".strip()
+
     return {
         **payload,
         "product_genitive": "программного обеспечения",
-        "customer_representative_name_genitive": payload.get("customer_representative_name", ""),
+        "customer_representative_name_genitive": inflect_fio_case(customer_fio, "gent"),
         "contractor_fio_full": fio,
         "contractor_ogrnip": payload.get("contractor_ogrn_or_ogrnip", ""),
         "work_scope": project_points,
         "customer_ogrn": payload.get("customer_ogrn_or_ogrnip", ""),
-        "customer_kpp": "Не указано",
+        "customer_kpp": payload.get("customer_kpp", "Не указано"),
         "contractor_address": payload.get("contractor_legal_address", ""),
         "contractor_fio_nominative": fio,
         "contractor_fio_genitive": inflect_fio_case(fio, "gent"),
         "contractor_fio_dative": inflect_fio_case(fio, "datv"),
         "contractor_fio_instrumental": inflect_fio_case(fio, "ablt"),
+        "contractor_intro_name": contractor_intro,
     }
 
 

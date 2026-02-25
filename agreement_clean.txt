@@ -20,7 +20,7 @@
 Договор на разработку {{ product_genitive }} № {{ contract_number }}
 Г. {{ city }}  									«{{ contract_day }}» {{ contract_month }} {{ contract_year }}г.
 
-ООО «{{ customer_company_name }}» в лице учредителя {{ customer_representative_name_genitive }} (ИНН: {{ customer_inn }}), действующего на основании {{ customer_representative_basis }}, именуемый в дальнейшем «Заказчик», с одной стороны, и {{ contractor_type }} {{ contractor_fio_nominative }} (ИНН: {{ contractor_inn }}) в лице {{ contractor_fio_genitive }}, действующего на основании ОГРНИП {{ contractor_ogrnip }}, именуемый в дальнейшем «Исполнитель», с другой стороны, именуемые в дальнейшем «Стороны», заключили настоящий договор, в дальнейшем «Договор», о нижеследующем:
+ООО «{{ customer_company_name }}» в лице учредителя {{ customer_representative_name_genitive }} (ИНН: {{ customer_inn }}), действующего на основании {{ customer_representative_basis }}, именуемый в дальнейшем «Заказчик», с одной стороны, и {{ contractor_intro_name }} (ИНН: {{ contractor_inn }}) в лице {{ contractor_fio_genitive }}, действующего на основании ОГРНИП {{ contractor_ogrnip }}, именуемый в дальнейшем «Исполнитель», с другой стороны, именуемые в дальнейшем «Стороны», заключили настоящий договор, в дальнейшем «Договор», о нижеследующем:
 	Предмет Договора
 	Заказчик поручает, а исполнитель обязуется выполнить все работы (далее – «Работы») по разработке {{ product_genitive }} в срок, установленный настоящим Договором в соответствии с Техническим заданием (Приложением №2), являющимся неотъемлемой частью настоящего Договора. Исполнитель обязуется выполнить следующие Работы:
 	{% for item in work_scope %}
