@@ -60,6 +60,12 @@ def extract_template_variables(template_text: str) -> set[str]:
     return set(re.findall(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}", template_text))
 
 
+def inflect_fio_case(full_name: str, _: str) -> str:
+    """
+    Без внешней морфологии: возвращаем исходное ФИО.
+    Это убирает зависимость от pkg_resources/setuptools.
+    """
+    return full_name or ""
 def inflect_fio_case(full_name: str, target_case: str) -> str:
     if not full_name:
         return ""
@@ -159,6 +165,16 @@ def generate_contract(data: ContractData):
 
     rendered_text = render_template(template_text, context)
 
+    required_vars = extract_template_variables(template_text)
+    missing_vars = sorted(var for var in required_vars if var not in context)
+    if missing_vars:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Template has unresolved variables: {', '.join(missing_vars)}",
+        )
+
+    rendered_text = render_template(template_text, context)
+
     try:
         template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
     except OSError as exc:
@@ -175,6 +191,7 @@ def generate_contract(data: ContractData):
         "status": "ok",
         "message": "Contract generated successfully",
         "output_file": OUTPUT_PATH.name,
+        "morphology_engine": "disabled",
         "morphology_engine": "pymorphy2" if morph is not None else "fallback",
         "output_file": str(OUTPUT_PATH.name),
     }

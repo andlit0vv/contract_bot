@@ -37,6 +37,10 @@ def generate_contract_number() -> str:
     return f"{datetime.date.today().year}-{random.randint(1000, 9999)}"
 
 
+def generate_contract_number() -> str:
+    return f"{datetime.date.today().year}-{random.randint(1000, 9999)}"
+
+
 
 
 def generate_contract_number() -> str:
@@ -105,6 +109,24 @@ async def start_handler(message: types.Message, state: FSMContext):
 @dp.callback_query(ContractForm.city_choice, F.data.startswith("city:"))
 async def city_choice_handler(callback: types.CallbackQuery, state: FSMContext):
     choice = callback.data.split(":", maxsplit=1)[1]
+
+    if choice == "moscow":
+        await state.update_data(city="Москва")
+        await callback.message.edit_text("Город: Москва")
+        await callback.message.answer("Тип заказчика:", reply_markup=customer_type_keyboard())
+        await state.set_state(ContractForm.customer_type)
+    else:
+        await callback.message.edit_text("Город: выбран ручной ввод")
+        await callback.message.answer("Введите название города:")
+        await state.set_state(ContractForm.city_custom)
+
+    await callback.answer()
+
+
+@dp.message(ContractForm.city_custom)
+async def city_custom_handler(message: types.Message, state: FSMContext):
+    await state.update_data(city=message.text)
+    await message.answer("Тип заказчика:", reply_markup=customer_type_keyboard())
 
     if choice == "moscow":
         await state.update_data(city="Москва")
@@ -245,6 +267,32 @@ async def customer_inn_choice_handler(callback: types.CallbackQuery, state: FSMC
 async def customer_inn_text_fallback_handler(message: types.Message, state: FSMContext):
     text = (message.text or "").strip()
 
+
+
+@dp.callback_query(ContractForm.customer_inn_choice, F.data.startswith("customer_inn:"))
+async def customer_inn_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    choice = callback.data.split(":", maxsplit=1)[1]
+
+    if choice == "auto":
+        inn = generate_inn()
+        await state.update_data(customer_inn=inn)
+        await callback.message.edit_text(f"ИНН заказчика: {inn} (сгенерирован)")
+        await callback.message.answer("Выберите банк заказчика:", reply_markup=customer_bank_keyboard())
+        await state.set_state(ContractForm.customer_bank_choice)
+    else:
+        await callback.message.edit_text("ИНН заказчика: выбран ручной ввод")
+        await callback.message.answer("Введите ИНН заказчика:")
+        await state.set_state(ContractForm.customer_inn_manual)
+
+    await callback.answer()
+
+
+
+
+@dp.message(ContractForm.customer_inn_choice)
+async def customer_inn_text_fallback_handler(message: types.Message, state: FSMContext):
+    text = (message.text or "").strip()
+
     if text.isdigit():
         await state.update_data(customer_inn=text)
         await message.answer("Выберите банк заказчика:", reply_markup=customer_bank_keyboard())
@@ -267,6 +315,15 @@ async def customer_inn_manual_handler(message: types.Message, state: FSMContext)
     await message.answer("Выберите банк заказчика:", reply_markup=customer_bank_keyboard())
     await state.set_state(ContractForm.customer_bank_choice)
 
+
+@dp.callback_query(ContractForm.customer_bank_choice, F.data.startswith("customer_bank:"))
+async def customer_bank_handler(callback: types.CallbackQuery, state: FSMContext):
+    selected_key = callback.data.split(":", maxsplit=1)[1]
+    bank_map = {
+        "t_bank": "Т-Банк",
+        "sber": "Сбербанк",
+        "alfa": "Альфа-Банк",
+    }
 
 @dp.callback_query(ContractForm.customer_inn_choice, F.data.startswith("customer_inn:"))
 async def customer_inn_choice_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -329,6 +386,10 @@ async def customer_bank_handler(callback: types.CallbackQuery, state: FSMContext
     await callback.answer()
 
 
+
+    await callback.answer()
+
+
 @dp.message(ContractForm.customer_bank_custom)
 async def customer_bank_custom_handler(message: types.Message, state: FSMContext):
     await state.update_data(customer_bank=message.text)
@@ -378,6 +439,23 @@ async def contractor_type_handler(callback: types.CallbackQuery, state: FSMConte
     }
     selected_key = callback.data.split(":", maxsplit=1)[1]
     selected_value = selected_map[selected_key]
+
+@dp.callback_query(ContractForm.contractor_type, F.data.startswith("contractor_type:"))
+async def contractor_type_handler(callback: types.CallbackQuery, state: FSMContext):
+    selected_map = {
+        "ip": "ИП",
+        "self": "Самозанятый",
+    }
+    selected_key = callback.data.split(":", maxsplit=1)[1]
+    selected_value = selected_map[selected_key]
+
+    await state.update_data(contractor_type=selected_value)
+    await callback.message.edit_text(f"Тип исполнителя: {selected_value}")
+
+    if selected_key == "ip":
+        await callback.message.answer("Введите название ИП (Фамилию). Например: “ИП Акимов”")
+    else:
+        await callback.message.answer("Введите ФИО полностью")
 
     await state.update_data(contractor_type=selected_value)
     await callback.message.edit_text(f"Тип исполнителя: {selected_value}")
