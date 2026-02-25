@@ -11,7 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 API_TOKEN = "8698344682:AAGjNOJcbbMVcTWMHy2HyPg42j_k8ExGF1w"
-BACKEND_URL = "http://127.0.0.1:8000/save-contract"
+BACKEND_URL = "http://127.0.0.1:8000/generate-contract"
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -215,8 +215,34 @@ async def project_description_handler(message: types.Message, state: FSMContext)
     await state.update_data(project_description=message.text)
     data = await state.get_data()
 
+    today = datetime.date.today()
     contract_payload = {
         "contract_number": generate_contract_number(),
+        "city": "Не указан",
+        "contract_day": str(today.day),
+        "contract_month": today.strftime("%m"),
+        "contract_year": str(today.year),
+        "customer_company_name": data.get("customer_company_name") or "Не указано",
+        "customer_representative_name": data.get("customer_representative_name") or "Не указано",
+        "customer_representative_basis": "Устава",
+        "customer_inn": data.get("customer_inn") or "Не указано",
+        "customer_ogrn_or_ogrnip": "Не указано",
+        "customer_legal_address": "Не указано",
+        "customer_bank": data.get("customer_bank") or "Не указано",
+        "customer_bik": "Не указано",
+        "customer_correspondent_account": "Не указано",
+        "customer_settlement_account": "Не указано",
+        "contractor_company_name": data.get("contractor_company_name") or "Не указано",
+        "contractor_representative_name": data.get("contractor_representative_name") or "Не указано",
+        "contractor_representative_basis": "Устава",
+        "contractor_inn": "Не указано",
+        "contractor_ogrn_or_ogrnip": "Не указано",
+        "contractor_legal_address": "Не указано",
+        "contractor_bank": "Не указано",
+        "contractor_bik": "Не указано",
+        "contractor_correspondent_account": "Не указано",
+        "contractor_settlement_account": "Не указано",
+        "vat_type": "Без НДС",
         "date": str(datetime.date.today()),
         "customer": {
             "type": data.get("customer_type"),
