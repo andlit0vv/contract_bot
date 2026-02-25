@@ -18,6 +18,8 @@ dp = Dispatcher()
 
 
 class ContractForm(StatesGroup):
+    city_choice = State()
+    city_custom = State()
     customer_type = State()
     customer_company = State()
     customer_representative = State()
@@ -38,6 +40,84 @@ def generate_contract_number() -> str:
 def generate_inn() -> str:
     return str(random.randint(10**9, 10**10 - 1))
 
+
+def city_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Москва", callback_data="city:moscow")],
+            [InlineKeyboardButton(text="Другой город", callback_data="city:other")],
+        ]
+    )
+
+
+def customer_type_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="ООО", callback_data="customer_type:ooo")],
+            [InlineKeyboardButton(text="ИП", callback_data="customer_type:ip")],
+            [InlineKeyboardButton(text="Самозанятый", callback_data="customer_type:self")],
+        ]
+    )
+
+
+def customer_inn_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Ввести свой ИНН", callback_data="customer_inn:manual")],
+            [InlineKeyboardButton(text="Сгенерировать ИНН", callback_data="customer_inn:auto")],
+        ]
+    )
+
+
+def customer_bank_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Т-Банк", callback_data="customer_bank:t_bank")],
+            [InlineKeyboardButton(text="Сбербанк", callback_data="customer_bank:sber")],
+            [InlineKeyboardButton(text="Альфа-Банк", callback_data="customer_bank:alfa")],
+            [InlineKeyboardButton(text="Другой", callback_data="customer_bank:other")],
+        ]
+    )
+
+
+def contractor_type_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="ИП", callback_data="contractor_type:ip")],
+            [InlineKeyboardButton(text="Самозанятый", callback_data="contractor_type:self")],
+        ]
+    )
+
+
+@dp.message(Command("start"))
+async def start_handler(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Выберите город:", reply_markup=city_keyboard())
+    await state.set_state(ContractForm.city_choice)
+
+
+@dp.callback_query(ContractForm.city_choice, F.data.startswith("city:"))
+async def city_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    choice = callback.data.split(":", maxsplit=1)[1]
+
+    if choice == "moscow":
+        await state.update_data(city="Москва")
+        await callback.message.edit_text("Город: Москва")
+        await callback.message.answer("Тип заказчика:", reply_markup=customer_type_keyboard())
+        await state.set_state(ContractForm.customer_type)
+    else:
+        await callback.message.edit_text("Город: выбран ручной ввод")
+        await callback.message.answer("Введите название города:")
+        await state.set_state(ContractForm.city_custom)
+
+    await callback.answer()
+
+
+@dp.message(ContractForm.city_custom)
+async def city_custom_handler(message: types.Message, state: FSMContext):
+    await state.update_data(city=message.text)
+    await message.answer("Тип заказчика:", reply_markup=customer_type_keyboard())
+    await state.set_state(ContractForm.customer_type)
 
 def legal_type_keyboard(prefix: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -118,6 +198,12 @@ async def customer_representative_handler(message: types.Message, state: FSMCont
 async def customer_inn_choice_handler(callback: types.CallbackQuery, state: FSMContext):
     choice = callback.data.split(":", maxsplit=1)[1]
 
+
+
+@dp.callback_query(ContractForm.customer_inn_choice, F.data.startswith("customer_inn:"))
+async def customer_inn_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    choice = callback.data.split(":", maxsplit=1)[1]
+
     if choice == "auto":
         inn = generate_inn()
         await state.update_data(customer_inn=inn)
@@ -156,11 +242,57 @@ async def customer_bank_handler(callback: types.CallbackQuery, state: FSMContext
         selected_bank = bank_map[selected_key]
         await state.update_data(customer_bank=selected_bank)
         await callback.message.edit_text(f"Банк заказчика: {selected_bank}")
+        await callback.message.answer("Тип исполнителя:", reply_markup=contractor_type_keyboard())
+        await state.set_state(ContractForm.contractor_type)
+
+    await callback.answer()
+
+
+@dp.message(ContractForm.customer_bank_custom)
+async def customer_bank_custom_handler(message: types.Message, state: FSMContext):
+    await state.update_data(customer_bank=message.text)
+    await message.answer("Тип исполнителя:", reply_markup=contractor_type_keyboard())
+    await state.set_state(ContractForm.contractor_type)
+
+@dp.callback_query(ContractForm.customer_bank_choice, F.data.startswith("customer_bank:"))
+async def customer_bank_handler(callback: types.CallbackQuery, state: FSMContext):
+    selected_key = callback.data.split(":", maxsplit=1)[1]
+    bank_map = {
+        "t_bank": "Т-Банк",
+        "sber": "Сбербанк",
+        "alfa": "Альфа-Банк",
+    }
+
+    if selected_key == "other":
+        await callback.message.edit_text("Банк заказчика: выбран вариант 'Другой'")
+        await callback.message.answer("Введите название банка заказчика:")
+        await state.set_state(ContractForm.customer_bank_custom)
+    else:
+        selected_bank = bank_map[selected_key]
+        await state.update_data(customer_bank=selected_bank)
+        await callback.message.edit_text(f"Банк заказчика: {selected_bank}")
         await callback.message.answer(
             "Тип исполнителя:",
             reply_markup=legal_type_keyboard("contractor_type"),
         )
         await state.set_state(ContractForm.contractor_type)
+
+@dp.callback_query(ContractForm.contractor_type, F.data.startswith("contractor_type:"))
+async def contractor_type_handler(callback: types.CallbackQuery, state: FSMContext):
+    selected_map = {
+        "ip": "ИП",
+        "self": "Самозанятый",
+    }
+    selected_key = callback.data.split(":", maxsplit=1)[1]
+    selected_value = selected_map[selected_key]
+
+    await state.update_data(contractor_type=selected_value)
+    await callback.message.edit_text(f"Тип исполнителя: {selected_value}")
+
+    if selected_key == "ip":
+        await callback.message.answer("Введите название ИП (Фамилию). Например: “ИП Акимов”")
+    else:
+        await callback.message.answer("Введите ФИО полностью")
 
     await callback.answer()
 
@@ -218,6 +350,7 @@ async def project_description_handler(message: types.Message, state: FSMContext)
     today = datetime.date.today()
     contract_payload = {
         "contract_number": generate_contract_number(),
+        "city": data.get("city") or "Москва",
         "city": "Не указан",
         "contract_day": str(today.day),
         "contract_month": today.strftime("%m"),
@@ -232,6 +365,7 @@ async def project_description_handler(message: types.Message, state: FSMContext)
         "customer_bik": "Не указано",
         "customer_correspondent_account": "Не указано",
         "customer_settlement_account": "Не указано",
+        "contractor_type": data.get("contractor_type") or "ИП",
         "contractor_company_name": data.get("contractor_company_name") or "Не указано",
         "contractor_representative_name": data.get("contractor_representative_name") or "Не указано",
         "contractor_representative_basis": "Устава",
@@ -266,6 +400,7 @@ async def project_description_handler(message: types.Message, state: FSMContext)
         if response.status_code == 200:
             await message.answer("Данные успешно сохранены и отправлены на backend.")
         else:
+            await message.answer(f"Backend вернул ошибку: {response.status_code} {response.text}")
             await message.answer(f"Backend вернул ошибку: {response.status_code}")
     except Exception:
         await message.answer("Backend недоступен. Попробуйте позже.")
