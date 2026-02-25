@@ -42,6 +42,7 @@ class ContractData(BaseModel):
     contractor_settlement_account: str
 
     vat_type: str
+    project_description: str = ""
 
 
 # -----------------------
@@ -142,9 +143,23 @@ def inflect_fio_case(full_name: str, case: str) -> str:
 
 def build_context(payload: dict) -> dict:
     fio = payload.get("contractor_representative_name", "")
+    project_description = payload.get("project_description", "")
+    project_points = [item.strip(" -\t") for item in project_description.split(";") if item.strip()]
+    if not project_points and project_description.strip():
+        project_points = [project_description.strip()]
+    if not project_points:
+        project_points = ["Объем работ уточняется в техническом задании."]
 
     return {
         **payload,
+        "product_genitive": "программного обеспечения",
+        "customer_representative_name_genitive": payload.get("customer_representative_name", ""),
+        "contractor_fio_full": fio,
+        "contractor_ogrnip": payload.get("contractor_ogrn_or_ogrnip", ""),
+        "work_scope": project_points,
+        "customer_ogrn": payload.get("customer_ogrn_or_ogrnip", ""),
+        "customer_kpp": "Не указано",
+        "contractor_address": payload.get("contractor_legal_address", ""),
         "contractor_fio_nominative": fio,
         "contractor_fio_genitive": inflect_fio_case(fio, "gent"),
         "contractor_fio_dative": inflect_fio_case(fio, "datv"),
@@ -154,6 +169,27 @@ def build_context(payload: dict) -> dict:
 
 def render_template(template_text: str, context: dict) -> str:
     rendered = template_text
+
+    # {% for item in work_scope %}...{{ item }}...{% endfor %}
+    def for_replacer(match: re.Match) -> str:
+        loop_var = match.group(1)
+        iterable_name = match.group(2)
+        block = match.group(3)
+        iterable = context.get(iterable_name, [])
+        if not isinstance(iterable, list):
+            return ""
+
+        chunks = []
+        for value in iterable:
+            chunks.append(re.sub(r"\{\{\s*" + re.escape(loop_var) + r"\s*\}\}", str(value), block))
+        return "".join(chunks)
+
+    rendered = re.sub(
+        r"\{%\s*for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*%\}(.*?)\{%\s*endfor\s*%\}",
+        for_replacer,
+        rendered,
+        flags=re.DOTALL,
+    )
 
     # {% if var == "value" %}
     def if_replacer(match: re.Match) -> str:
@@ -202,15 +238,9 @@ def generate_contract(data: ContractData):
 
     context = build_context(payload)
 
-    # Проверка переменных
     required_vars = extract_template_variables(template_text)
-    missing = [v for v in required_vars if v not in context]
-
-    if missing:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Missing variables: {', '.join(missing)}",
-        )
+    for var_name in required_vars:
+        context.setdefault(var_name, "")
 
     rendered = render_template(template_text, context)
 
