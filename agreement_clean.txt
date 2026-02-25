@@ -13,3 +13,160 @@
 Банк: {{ contractor_bank }}, БИК {{ contractor_bik }}, к/с {{ contractor_correspondent_account }}, р/с {{ contractor_settlement_account }}.
 
 НДС: {{ vat_type }}.
+ДОГОВОР НА РАЗРАБОТКУ МОБИЛЬНОГО ПРИЛОЖЕНИЯ № {{ contract_number }}
+
+г. {{ city }}                                         «{{ contract_day }}» {{ contract_month }} {{ contract_year }} г.
+
+{{ customer_company_name }} в лице {{ customer_representative_name }},
+действующего на основании {{ customer_representative_basis }},
+ИНН: {{ customer_inn }}, ОГРН/ОГРНИП: {{ customer_ogrn_or_ogrnip }},
+именуемый в дальнейшем «Заказчик», с одной стороны,
+
+и
+
+{{ contractor_company_name }} в лице {{ contractor_representative_name }},
+действующего на основании {{ contractor_representative_basis }},
+ИНН: {{ contractor_inn }}, ОГРН/ОГРНИП: {{ contractor_ogrn_or_ogrnip }},
+именуемый в дальнейшем «Исполнитель», с другой стороны,
+
+заключили настоящий Договор о нижеследующем:
+
+---------------------------------------------------------------------
+
+1. ПРЕДМЕТ ДОГОВОРА
+
+1.1. Заказчик поручает, а Исполнитель обязуется выполнить работы по разработке {{ product_genitive }} в соответствии с Техническим заданием.
+
+1.2. Предмет договора:
+
+{{ subject_clause }}
+
+1.3. В состав работ входит:
+
+{% for item in work_scope %}
+- {{ item }}
+{% endfor %}
+
+1.4. Исполнитель передает Заказчику исключительные имущественные права на созданное программное обеспечение в соответствии с моделью:
+
+Модель передачи прав: {{ ip_transfer_model }}
+
+Передача исходного кода: {{ source_code_transfer }}
+
+Передача доступов: {{ access_transfer_required }}
+
+---------------------------------------------------------------------
+
+2. СРОКИ ВЫПОЛНЕНИЯ РАБОТ
+
+2.1. Срок начала работ — следующий рабочий день после подписания Договора.
+
+2.2. Общая продолжительность работ:
+{{ estimated_duration_days }} рабочих дней.
+
+2.3. Этапы выполнения работ:
+
+{% for stage in stages %}
+Этап: {{ stage.name }}
+Срок: {{ stage.duration_days }} рабочих дней
+Доля оплаты: {{ stage.payment_percent }}%
+{% endfor %}
+
+---------------------------------------------------------------------
+
+3. СТОИМОСТЬ РАБОТ И ПОРЯДОК РАСЧЕТОВ
+
+3.1. Общая стоимость работ:
+{{ estimated_total_cost }} руб. ({{ vat_type }})
+
+3.2. Предоплата:
+{{ prepayment_percent }} %
+
+3.3. Оплата осуществляется по этапам согласно распределению процентов, указанному выше.
+
+---------------------------------------------------------------------
+
+4. ТЕХНИЧЕСКИЕ ПАРАМЕТРЫ ПРОЕКТА
+
+Категория проекта: {{ project_category }}
+Платформа: {{ platform }}
+Бизнес-домен: {{ business_domain }}
+Целевая аудитория: {{ target_users }}
+
+Основные модули:
+{% for module in core_modules %}
+- {{ module }}
+{% endfor %}
+
+Интеграции:
+{% for integration in integrations %}
+- {{ integration }}
+{% endfor %}
+
+Технологический стек:
+
+Backend: {{ recommended_tech_stack.backend }}
+Frontend: {{ recommended_tech_stack.frontend }}
+Mobile: {{ recommended_tech_stack.mobile }}
+Database: {{ recommended_tech_stack.database }}
+Infrastructure: {{ recommended_tech_stack.infrastructure }}
+
+Ожидаемое количество пользователей: {{ expected_users_count }}
+Одновременная нагрузка: {{ expected_concurrent_users }}
+
+Обработка персональных данных: {{ personal_data_processing }}
+Наличие админ-панели: {{ admin_panel_required }}
+Мультиязычность: {{ multilanguage }}
+
+Уровень сложности проекта: {{ complexity_level }}
+
+---------------------------------------------------------------------
+
+5. ОТВЕТСТВЕННОСТЬ СТОРОН
+
+Неустойка за просрочку выполнения:
+{{ penalty_for_delay_percent_per_day }} % в день,
+но не более {{ penalty_cap_percent }} %
+
+---------------------------------------------------------------------
+
+6. ГАРАНТИЙНЫЕ ОБЯЗАТЕЛЬСТВА
+
+Гарантийный срок:
+{{ warranty_months }} месяцев
+
+---------------------------------------------------------------------
+
+7. ЮРИДИЧЕСКИЕ РЕКВИЗИТЫ
+
+ЗАКАЗЧИК:
+
+{{ customer_company_name }}
+Юридический адрес: {{ customer_legal_address }}
+ИНН: {{ customer_inn }}
+ОГРН/ОГРНИП: {{ customer_ogrn_or_ogrnip }}
+
+Банк: {{ customer_bank }}
+БИК: {{ customer_bik }}
+Кор. счет: {{ customer_correspondent_account }}
+Расчетный счет: {{ customer_settlement_account }}
+
+ИСПОЛНИТЕЛЬ:
+
+{{ contractor_company_name }}
+Юридический адрес: {{ contractor_legal_address }}
+ИНН: {{ contractor_inn }}
+ОГРН/ОГРНИП: {{ contractor_ogrn_or_ogrnip }}
+
+Банк: {{ contractor_bank }}
+БИК: {{ contractor_bik }}
+Кор. счет: {{ contractor_correspondent_account }}
+Расчетный счет: {{ contractor_settlement_account }}
+
+---------------------------------------------------------------------
+
+ПОДПИСИ СТОРОН:
+
+Заказчик: ________________________
+
+Исполнитель: ________________________

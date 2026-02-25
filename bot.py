@@ -243,6 +243,20 @@ async def project_description_handler(message: types.Message, state: FSMContext)
         "contractor_correspondent_account": "Не указано",
         "contractor_settlement_account": "Не указано",
         "vat_type": "Без НДС",
+        "date": str(datetime.date.today()),
+        "customer": {
+            "type": data.get("customer_type"),
+            "company_name": data.get("customer_company_name"),
+            "representative_name": data.get("customer_representative_name"),
+            "inn": data.get("customer_inn"),
+            "bank": data.get("customer_bank"),
+        },
+        "contractor": {
+            "type": data.get("contractor_type"),
+            "company_name": data.get("contractor_company_name"),
+            "representative_name": data.get("contractor_representative_name"),
+        },
+        "project_description": data.get("project_description"),
     }
 
     print(json.dumps(contract_payload, indent=4, ensure_ascii=False))
