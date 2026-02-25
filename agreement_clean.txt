@@ -1,0 +1,21 @@
+ДОГОВОР № {{ contract_number }}
+г. {{ city }}
+"{{ contract_day }}" {{ contract_month }} {{ contract_year }} г.
+
+Заказчик: {{ customer_company_name }}, в лице {{ customer_representative_name }}, действующего на основании {{ customer_representative_basis }}.
+ИНН/ОГРН(ИП): {{ customer_inn }} / {{ customer_ogrn_or_ogrnip }}.
+Юридический адрес: {{ customer_legal_address }}.
+Банк: {{ customer_bank }}, БИК {{ customer_bik }}, к/с {{ customer_correspondent_account }}, р/с {{ customer_settlement_account }}.
+
+Исполнитель ({{ contractor_type }}): {{ contractor_company_name }}, в лице {{ contractor_representative_name }}, действующего на основании {{ contractor_representative_basis }}.
+ИНН: {{ contractor_inn }}.
+{% if contractor_type == "ИП" %}ОГРНИП: {{ contractor_ogrn_or_ogrnip }}.{% endif %}
+Юридический адрес: {{ contractor_legal_address }}.
+Банк: {{ contractor_bank }}, БИК {{ contractor_bik }}, к/с {{ contractor_correspondent_account }}, р/с {{ contractor_settlement_account }}.
+
+ФИО исполнителя (И.п.): {{ contractor_fio_nominative }}.
+ФИО исполнителя (Р.п.): {{ contractor_fio_genitive }}.
+ФИО исполнителя (Д.п.): {{ contractor_fio_dative }}.
+ФИО исполнителя (Т.п.): {{ contractor_fio_instrumental }}.
+
+НДС: {{ vat_type }}.
