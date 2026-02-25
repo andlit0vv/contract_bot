@@ -12,6 +12,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 API_TOKEN = "8698344682:AAGjNOJcbbMVcTWMHy2HyPg42j_k8ExGF1w"
 BACKEND_URL = "http://127.0.0.1:8000/generate-contract"
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -126,6 +127,23 @@ def bank_keyboard(prefix: str) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Другой", callback_data=f"{prefix}:manual")],
         ]
     )
+
+
+def reverse_geocode(latitude: float, longitude: float) -> str:
+    try:
+        response = requests.get(
+            NOMINATIM_REVERSE_URL,
+            params={"format": "jsonv2", "lat": latitude, "lon": longitude, "accept-language": "ru"},
+            headers={"User-Agent": "contract-bot/1.0"},
+            timeout=10,
+        )
+        if response.status_code != 200:
+            return "Адрес по геолокации не определён"
+
+        address = response.json().get("display_name", "").strip()
+        return address or "Адрес по геолокации не определён"
+    except Exception:
+        return "Адрес по геолокации не определён"
 
 
 async def ask_customer_ogrn(message: types.Message, state: FSMContext):
@@ -323,8 +341,9 @@ async def customer_address_choice_handler(callback: types.CallbackQuery, state: 
 @dp.message(ContractForm.customer_address_choice, F.location)
 async def customer_address_location_handler(message: types.Message, state: FSMContext):
     loc = message.location
-    await state.update_data(customer_legal_address=f"координаты: {loc.latitude}, {loc.longitude}")
-    await message.answer("Геолокация получена, адрес будет сформирован по координатам.")
+    address = reverse_geocode(loc.latitude, loc.longitude)
+    await state.update_data(customer_legal_address=address)
+    await message.answer(f"Геолокация получена. Определённый адрес: {address}")
     await ask_customer_bank(message, state)
 
 
@@ -526,8 +545,9 @@ async def contractor_address_choice_handler(callback: types.CallbackQuery, state
 @dp.message(ContractForm.contractor_address_choice, F.location)
 async def contractor_address_location_handler(message: types.Message, state: FSMContext):
     loc = message.location
-    await state.update_data(contractor_legal_address=f"координаты: {loc.latitude}, {loc.longitude}")
-    await message.answer("Геолокация получена, адрес будет сформирован по координатам.")
+    address = reverse_geocode(loc.latitude, loc.longitude)
+    await state.update_data(contractor_legal_address=address)
+    await message.answer(f"Геолокация получена. Определённый адрес: {address}")
     await ask_contractor_bank(message, state)
 
 

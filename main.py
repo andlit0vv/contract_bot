@@ -54,94 +54,6 @@ def extract_template_variables(template_text: str) -> set[str]:
     return set(re.findall(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}", template_text))
 
 
-def inflect_word(word: str, case: str) -> str:
-    """
-    Простое склонение русских ФИО без библиотек.
-    case: gent (Р.п.), datv (Д.п.), ablt (Т.п.)
-    """
-
-    if not word:
-        return word
-
-    # -------- ФАМИЛИИ --------
-    if word.endswith("ов") or word.endswith("ев") or word.endswith("ин"):
-        if case == "gent":
-            return word + "а"
-        if case == "datv":
-            return word + "у"
-        if case == "ablt":
-            return word + "ым"
-
-    if word.endswith("ова") or word.endswith("ева") or word.endswith("ина"):
-        if case == "gent":
-            return word[:-1] + "ой"
-        if case == "datv":
-            return word[:-1] + "ой"
-        if case == "ablt":
-            return word[:-1] + "ой"
-
-    # -------- ИМЕНА --------
-    if word.endswith("й"):
-        base = word[:-1]
-        if case == "gent":
-            return base + "я"
-        if case == "datv":
-            return base + "ю"
-        if case == "ablt":
-            return base + "ем"
-
-    if word.endswith("а"):
-        base = word[:-1]
-        if case == "gent":
-            return base + "ы"
-        if case == "datv":
-            return base + "е"
-        if case == "ablt":
-            return base + "ой"
-
-    if word.endswith("я"):
-        base = word[:-1]
-        if case == "gent":
-            return base + "и"
-        if case == "datv":
-            return base + "е"
-        if case == "ablt":
-            return base + "ей"
-
-    # -------- ОТЧЕСТВА --------
-    if word.endswith("ич"):
-        if case == "gent":
-            return word + "а"
-        if case == "datv":
-            return word + "у"
-        if case == "ablt":
-            return word + "ем"
-
-    if word.endswith("на"):
-        base = word[:-1]
-        if case == "gent":
-            return base + "ы"
-        if case == "datv":
-            return base + "е"
-        if case == "ablt":
-            return base + "ой"
-
-    # fallback
-    return word
-
-
-def inflect_fio_case(full_name: str, case: str) -> str:
-    if not full_name:
-        return ""
-
-    if case == "nomn":
-        return full_name
-
-    parts = full_name.split()
-    inflected = [inflect_word(p, case) for p in parts]
-    return " ".join(inflected)
-
-
 def to_initials(full_name: str) -> str:
     parts = [part for part in full_name.split() if part]
     if not parts:
@@ -168,7 +80,7 @@ def build_context(payload: dict) -> dict:
     return {
         **payload,
         "product_genitive": "программного обеспечения",
-        "customer_representative_name_genitive": inflect_fio_case(customer_fio, "gent"),
+        "customer_representative_name_genitive": customer_fio,
         "contractor_fio_full": fio,
         "contractor_ogrnip": payload.get("contractor_ogrn_or_ogrnip", ""),
         "work_scope": project_points,
@@ -176,9 +88,9 @@ def build_context(payload: dict) -> dict:
         "customer_kpp": payload.get("customer_kpp", "Не указано"),
         "contractor_address": payload.get("contractor_legal_address", ""),
         "contractor_fio_nominative": fio,
-        "contractor_fio_genitive": inflect_fio_case(fio, "gent"),
-        "contractor_fio_dative": inflect_fio_case(fio, "datv"),
-        "contractor_fio_instrumental": inflect_fio_case(fio, "ablt"),
+        "contractor_fio_genitive": fio,
+        "contractor_fio_dative": fio,
+        "contractor_fio_instrumental": fio,
         "contractor_intro_name": contractor_intro,
     }
 
