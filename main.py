@@ -19,6 +19,8 @@ if importlib.util.find_spec("pymorphy2"):
         morph = pymorphy2_module.MorphAnalyzer()
     except Exception:
         morph = None
+    pymorphy2_module = importlib.import_module("pymorphy2")
+    morph = pymorphy2_module.MorphAnalyzer()
 
 
 class ContractData(BaseModel):
@@ -109,6 +111,18 @@ def render_template(template_text: str, context: dict) -> str:
 
     rendered = re.sub(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}", var_replacer, rendered)
     return rendered
+def render_contract_template(template_text: str, payload: dict) -> str:
+    """
+    Replace placeholders like {{ field_name }} with values from payload.
+    Unknown placeholders are replaced with an empty string.
+    """
+
+    def replacer(match: re.Match) -> str:
+        field_name = match.group(1).strip()
+        value = payload.get(field_name, "")
+        return str(value)
+
+    return re.sub(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", replacer, template_text)
 
 
 @app.post("/generate-contract")
@@ -135,6 +149,23 @@ def generate_contract(data: ContractData):
 
     rendered_text = render_template(template_text, context)
 
+    required_vars = extract_template_variables(template_text)
+    missing_vars = sorted(var for var in required_vars if var not in context)
+    if missing_vars:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Template has unresolved variables: {', '.join(missing_vars)}",
+        )
+
+    rendered_text = render_template(template_text, context)
+
+    try:
+        template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read template file: {exc}") from exc
+
+    rendered_text = render_contract_template(template_text, payload)
+
     try:
         OUTPUT_PATH.write_text(rendered_text, encoding="utf-8")
     except OSError as exc:
@@ -145,4 +176,5 @@ def generate_contract(data: ContractData):
         "message": "Contract generated successfully",
         "output_file": OUTPUT_PATH.name,
         "morphology_engine": "pymorphy2" if morph is not None else "fallback",
+        "output_file": str(OUTPUT_PATH.name),
     }
