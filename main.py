@@ -14,6 +14,11 @@ OUTPUT_PATH = BASE_DIR / "agreement_filled.txt"
 
 morph = None
 if importlib.util.find_spec("pymorphy2"):
+    try:
+        pymorphy2_module = importlib.import_module("pymorphy2")
+        morph = pymorphy2_module.MorphAnalyzer()
+    except Exception:
+        morph = None
     pymorphy2_module = importlib.import_module("pymorphy2")
     morph = pymorphy2_module.MorphAnalyzer()
 
@@ -133,6 +138,16 @@ def generate_contract(data: ContractData):
         raise HTTPException(status_code=500, detail=f"Failed to read template file: {exc}") from exc
 
     context = build_context(payload)
+
+    required_vars = extract_template_variables(template_text)
+    missing_vars = sorted(var for var in required_vars if var not in context)
+    if missing_vars:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Template has unresolved variables: {', '.join(missing_vars)}",
+        )
+
+    rendered_text = render_template(template_text, context)
 
     required_vars = extract_template_variables(template_text)
     missing_vars = sorted(var for var in required_vars if var not in context)

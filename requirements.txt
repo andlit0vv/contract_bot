@@ -3,3 +3,4 @@ fastapi
 uvicorn
 requests
 pymorphy2
+setuptools
