@@ -236,6 +236,19 @@ def _ru_days_word(value: int) -> str:
 
 
 def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
+    try:
+        from openai import (
+            APIConnectionError,
+            APIError,
+            APITimeoutError,
+            AuthenticationError,
+            BadRequestError,
+            OpenAI,
+            PermissionDeniedError,
+        )
+    except ImportError:
+        raise HTTPException(status_code=503, detail="OpenAI client is not installed on backend")
+
     load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
