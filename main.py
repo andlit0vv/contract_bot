@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from openai import (
     APIConnectionError,
     APIError,
+    BadRequestError,
     APITimeoutError,
     AuthenticationError,
     OpenAI,
@@ -249,6 +250,7 @@ def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
     client = OpenAI(api_key=api_key)
     user_prompt = f"Project description:\n{project_description}"
     permission_denied_models: list[str] = []
+    bad_request_details: list[str] = []
 
     for model_name in LLM_MODELS:
         for _ in range(2):
@@ -261,6 +263,19 @@ def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
                         {"role": "user", "content": user_prompt},
                     ],
                 )
+            except BadRequestError as exc:
+                bad_request_details.append(f"{model_name}: {str(exc)}")
+                try:
+                    completion = client.responses.create(
+                        model=model_name,
+                        input=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                    )
+                except BadRequestError as exc_no_temp:
+                    bad_request_details.append(f"{model_name} (no temperature): {str(exc_no_temp)}")
+                    break
             except (APIConnectionError, APITimeoutError):
                 raise HTTPException(status_code=502, detail="OpenAI API connection error")
             except AuthenticationError:
@@ -284,6 +299,15 @@ def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
                 "OpenAI access denied for configured models: "
                 f"{', '.join(permission_denied_models)}. "
                 "Grant access or set OPENAI_MODELS/OPENAI_MODEL to an allowed model."
+            ),
+        )
+
+    if bad_request_details:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "OpenAI request rejected for configured models. "
+                f"Details: {' | '.join(bad_request_details)}"
             ),
         )
 
