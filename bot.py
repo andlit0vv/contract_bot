@@ -153,12 +153,6 @@ def bank_keyboard(prefix: str) -> InlineKeyboardMarkup:
     are not supported in the current aiogram / Bot API version.
     """
 
-    # Placeholder custom emoji IDs (set to real IDs if available)
-    T_BANK_EMOJI_ID: str | None = None
-    SBER_EMOJI_ID: str | None = None
-    ALFA_EMOJI_ID: str | None = None
-    OTHER_EMOJI_ID: str | None = None
-
     def make_button(
         text: str,
         suffix: str,
@@ -188,29 +182,29 @@ def bank_keyboard(prefix: str) -> InlineKeyboardMarkup:
     btn_t = make_button(
         text="Т-Банк",
         suffix="t_bank",
-        style="primary",
+        style="default",
         icon_id=T_BANK_EMOJI_ID,
-        fallback_text="🟡 Т-Банк <tg-emoji emoji-id=\"5228821549838000334\">🏦</tg-emoji>",
+        fallback_text="🏦 Т-Банк",
     )
     btn_s = make_button(
         text="Sberbank",
         suffix="sber",
         style="success",
         icon_id=SBER_EMOJI_ID,
-        fallback_text="🟢 Sberbank",
+        fallback_text="💫 Sberbank",
     )
     btn_a = make_button(
         text="Alfa-Bank",
         suffix="alfa",
         style="danger",
         icon_id=ALFA_EMOJI_ID,
-        fallback_text="🔴 Alfa-Bank",
+        fallback_text="❤️ Alfa-Bank",
     )
     btn_other = make_button(
         text="Other",
         suffix="manual",
         style="default",
-        icon_id=OTHER_EMOJI_ID,
+        icon_id=None,
         fallback_text="Other",
     )
 
