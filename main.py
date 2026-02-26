@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+from dotenv import load_dotenv
 import os
 import re
 from typing import Any
@@ -18,6 +19,7 @@ from openai import OpenAI
 from pydantic import BaseModel
 
 app = FastAPI()
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_PATH = BASE_DIR / "agreement_clean.txt"
@@ -228,6 +230,7 @@ def _ru_days_word(value: int) -> str:
 
 
 def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
+    load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not set")
@@ -241,9 +244,7 @@ def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
     for _ in range(2):
         try:
             completion = client.responses.create(
-                model=LLM_MODEL,
                 model="gpt-5-mini",
-                temperature=0,
                 input=[
                     {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
