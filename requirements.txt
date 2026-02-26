@@ -2,3 +2,5 @@ aiogram
 fastapi
 uvicorn
 requests
+
+openai
