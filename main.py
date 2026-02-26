@@ -25,6 +25,11 @@ BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_PATH = BASE_DIR / "agreement_clean.txt"
 OUTPUT_PATH = BASE_DIR / "agreement_filled.txt"
 
+LLM_MODELS = [
+    model.strip()
+    for model in os.getenv("OPENAI_MODELS", os.getenv("OPENAI_MODEL", "gpt-5-mini,gpt-4.1-mini")).split(",")
+    if model.strip()
+]
 LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
 SYSTEM_PROMPT = """You are a legally oriented system analyst.
@@ -237,6 +242,50 @@ def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
 
     if not project_description.strip():
         raise HTTPException(status_code=422, detail="project_description is required")
+
+    if not LLM_MODELS:
+        raise HTTPException(status_code=500, detail="No OpenAI models configured")
+
+    client = OpenAI(api_key=api_key)
+    user_prompt = f"Project description:\n{project_description}"
+    permission_denied_models: list[str] = []
+
+    for model_name in LLM_MODELS:
+        for _ in range(2):
+            try:
+                completion = client.responses.create(
+                    model=model_name,
+                    temperature=0,
+                    input=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+            except (APIConnectionError, APITimeoutError):
+                raise HTTPException(status_code=502, detail="OpenAI API connection error")
+            except AuthenticationError:
+                raise HTTPException(status_code=401, detail="OpenAI API authentication failed")
+            except PermissionDeniedError:
+                permission_denied_models.append(model_name)
+                break
+            except APIError as exc:
+                raise HTTPException(status_code=502, detail=f"OpenAI API error: {exc.__class__.__name__}")
+
+            text = completion.output_text.strip()
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                continue
+
+    if permission_denied_models and len(permission_denied_models) == len(LLM_MODELS):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "OpenAI access denied for configured models: "
+                f"{', '.join(permission_denied_models)}. "
+                "Grant access or set OPENAI_MODELS/OPENAI_MODEL to an allowed model."
+            ),
+        )
 
     client = OpenAI(api_key=api_key)
     user_prompt = f"Project description:\n{project_description}"
