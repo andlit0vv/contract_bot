@@ -3,20 +3,35 @@ import datetime
 import json
 import random
 
+import aiohttp
 import requests
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 API_TOKEN = "8698344682:AAGjNOJcbbMVcTWMHy2HyPg42j_k8ExGF1w"
 BACKEND_URL = "http://127.0.0.1:8000/generate-contract"
-NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
+T_BANK_EMOJI_ID = "5228821549838000334"
+T_BANK_EMOJI_FALLBACK = "🏦"
+
+SBER_EMOJI_ID = "5258383045232183945"
+SBER_EMOJI_FALLBACK = "💫"
+
+ALFA_EMOJI_ID = "5231147734190269621"
+ALFA_EMOJI_FALLBACK = "❤️"
 
 class ContractForm(StatesGroup):
     city_choice = State()
@@ -43,8 +58,8 @@ class ContractForm(StatesGroup):
     customer_kpp_manual = State()
 
     contractor_type = State()
-    contractor_company = State()
     contractor_representative = State()
+    contractor_requisites_choice = State()
     contractor_inn_choice = State()
     contractor_inn_manual = State()
     contractor_ogrn_choice = State()
@@ -100,6 +115,16 @@ def legal_type_keyboard(prefix: str) -> InlineKeyboardMarkup:
     )
 
 
+def contractor_type_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="ИП", callback_data="contractor_type:ip")],
+            [InlineKeyboardButton(text="ООО", callback_data="contractor_type:ooo")],
+            [InlineKeyboardButton(text="Самозанятый", callback_data="contractor_type:self")],
+        ]
+    )
+
+
 def input_choice_keyboard(prefix: str, own_text: str, auto_text: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -119,89 +144,204 @@ def address_choice_keyboard(prefix: str) -> InlineKeyboardMarkup:
 
 
 def bank_keyboard(prefix: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Т-Банк", callback_data=f"{prefix}:t_bank")],
-            [InlineKeyboardButton(text="Сбербанк", callback_data=f"{prefix}:sber")],
-            [InlineKeyboardButton(text="Альфа-Банк", callback_data=f"{prefix}:alfa")],
-            [InlineKeyboardButton(text="Другой", callback_data=f"{prefix}:manual")],
-        ]
+    """
+    Build bank selection keyboard using InlineKeyboardBuilder.
+    Layout:
+      Row 1 — T-Bank (primary), Sberbank (success)
+      Row 2 — Alfa-Bank (danger), Other (default)
+    Falls back to emoji-only text buttons if styles or icon_custom_emoji_id
+    are not supported in the current aiogram / Bot API version.
+    """
+
+    # Placeholder custom emoji IDs (set to real IDs if available)
+    T_BANK_EMOJI_ID: str | None = None
+    SBER_EMOJI_ID: str | None = None
+    ALFA_EMOJI_ID: str | None = None
+    OTHER_EMOJI_ID: str | None = None
+
+    def make_button(
+        text: str,
+        suffix: str,
+        *,
+        style: str | None,
+        icon_id: str | None,
+        fallback_text: str,
+    ) -> InlineKeyboardButton:
+        base_kwargs = {
+            "text": text,
+            "callback_data": f"{prefix}:{suffix}",
+        }
+        styled_kwargs = dict(base_kwargs)
+        if style is not None:
+            styled_kwargs["style"] = style
+        if icon_id is not None:
+            styled_kwargs["icon_custom_emoji_id"] = icon_id
+
+        try:
+            return InlineKeyboardButton(**styled_kwargs)
+        except TypeError:
+            return InlineKeyboardButton(
+                text=fallback_text,
+                callback_data=f"{prefix}:{suffix}",
+            )
+
+    btn_t = make_button(
+        text="Т-Банк",
+        suffix="t_bank",
+        style="primary",
+        icon_id=T_BANK_EMOJI_ID,
+        fallback_text="🟡 Т-Банк <tg-emoji emoji-id=\"5228821549838000334\">🏦</tg-emoji>",
+    )
+    btn_s = make_button(
+        text="Sberbank",
+        suffix="sber",
+        style="success",
+        icon_id=SBER_EMOJI_ID,
+        fallback_text="🟢 Sberbank",
+    )
+    btn_a = make_button(
+        text="Alfa-Bank",
+        suffix="alfa",
+        style="danger",
+        icon_id=ALFA_EMOJI_ID,
+        fallback_text="🔴 Alfa-Bank",
+    )
+    btn_other = make_button(
+        text="Other",
+        suffix="manual",
+        style="default",
+        icon_id=OTHER_EMOJI_ID,
+        fallback_text="Other",
     )
 
+    builder = InlineKeyboardBuilder()
+    builder.row(btn_t, btn_s)
+    builder.row(btn_a, btn_other)
+    return builder.as_markup()
 
-def reverse_geocode(latitude: float, longitude: float) -> str:
+
+async def reverse_geocode_address(latitude: float, longitude: float) -> str | None:
+    """
+    Reverse geocode coordinates to a formatted address "Street, House".
+    Uses OpenStreetMap Nominatim with proper async requests, User-Agent and timeout.
+    Returns None on any failure. Coordinates are not stored.
+    """
+
+    # Basic validation of coordinate ranges
+    if not (-90.0 <= float(latitude) <= 90.0 and -180.0 <= float(longitude) <= 180.0):
+        return None
+
+    url = "https://nominatim.openstreetmap.org/reverse"
+    params = {
+        "format": "jsonv2",
+        "lat": str(latitude),
+        "lon": str(longitude),
+        "addressdetails": 1,
+    }
+    headers = {
+        # Adjust contact information if needed to comply with Nominatim usage policy
+        "User-Agent": "contract-bot/1.0 (+https://t.me/your_bot_username)",
+        "Accept-Language": "ru,en",
+    }
+
+    timeout = aiohttp.ClientTimeout(total=5)
+
     try:
-        response = requests.get(
-            NOMINATIM_REVERSE_URL,
-            params={"format": "jsonv2", "lat": latitude, "lon": longitude, "accept-language": "ru"},
-            headers={"User-Agent": "contract-bot/1.0"},
-            timeout=10,
-        )
-        if response.status_code != 200:
-            return "Адрес по геолокации не определён"
-
-        address = response.json().get("display_name", "").strip()
-        return address or "Адрес по геолокации не определён"
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, params=params, headers=headers) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        return None
     except Exception:
-        return "Адрес по геолокации не определён"
+        return None
+
+    address = data.get("address") or {}
+
+    # Extract only street-like fields and house_number; ignore business names.
+    street = (
+        address.get("road")
+        or address.get("pedestrian")
+        or address.get("footway")
+        or address.get("residential")
+        or address.get("street")
+    )
+    house = address.get("house_number")
+
+    if not street or not house:
+        return None
+
+    return f"{street}, {house}"
+
+
+def location_reply_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Share location", request_location=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
 
 async def ask_customer_ogrn(message: types.Message, state: FSMContext):
-    await message.answer(
-        "ОГРН/ОГРНИП заказчика:",
-        reply_markup=input_choice_keyboard("customer_ogrn", "Ввести вручную", "Сгенерировать ОГРН(ИП)"),
-    )
-    await state.set_state(ContractForm.customer_ogrn_choice)
+    await message.answer("Введите ОГРН или ОГРНИП заказчика.")
+    await state.set_state(ContractForm.customer_ogrn_manual)
 
 
 async def ask_customer_address(message: types.Message, state: FSMContext):
-    await message.answer("Юридический адрес заказчика:", reply_markup=address_choice_keyboard("customer_address"))
+    await message.answer(
+        "Укажите юридический адрес заказчика. Можно отправить текстом или геолокацией.",
+        reply_markup=location_reply_keyboard(),
+    )
     await state.set_state(ContractForm.customer_address_choice)
 
 
 async def ask_customer_bank(message: types.Message, state: FSMContext):
-    await message.answer("Выберите банк заказчика:", reply_markup=bank_keyboard("customer_bank"))
+    await message.answer("Выберите банк заказчика.", reply_markup=bank_keyboard("customer_bank"))
     await state.set_state(ContractForm.customer_bank_choice)
 
 
 async def ask_customer_bik(message: types.Message, state: FSMContext):
-    await message.answer("БИК заказчика:", reply_markup=input_choice_keyboard("customer_bik", "Ввести вручную", "Сгенерировать БИК"))
-    await state.set_state(ContractForm.customer_bik_choice)
+    await message.answer("БИК заказчика:")
+    await state.set_state(ContractForm.customer_bik_manual)
 
 
 async def ask_customer_corr(message: types.Message, state: FSMContext):
-    await message.answer("к/с заказчика:", reply_markup=input_choice_keyboard("customer_corr", "Ввести вручную", "Сгенерировать к/с"))
-    await state.set_state(ContractForm.customer_corr_choice)
+    await message.answer("Введите корреспондентский счет")
+    await state.set_state(ContractForm.customer_corr_manual)
 
 
 async def ask_customer_settlement(message: types.Message, state: FSMContext):
-    await message.answer("р/с заказчика:", reply_markup=input_choice_keyboard("customer_settlement", "Ввести вручную", "Сгенерировать р/с"))
-    await state.set_state(ContractForm.customer_settlement_choice)
+    await message.answer("Введите расчетный счет")
+    await state.set_state(ContractForm.customer_settlement_manual)
 
 
 async def ask_contractor_type(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    if data.get("customer_type") == "ООО":
-        await message.answer("КПП заказчика:", reply_markup=input_choice_keyboard("customer_kpp", "Ввести вручную", "Сгенерировать КПП"))
-        await state.set_state(ContractForm.customer_kpp_choice)
+    if data.get("customer_type") == "ООО" and data.get("customer_requisites_mode") != "auto":
+        await message.answer("Введите КПП заказчика:")
+        await state.set_state(ContractForm.customer_kpp_manual)
         return
 
-    await message.answer("Тип исполнителя:", reply_markup=legal_type_keyboard("contractor_type"))
+    await message.answer("Выберите тип исполнителя.", reply_markup=contractor_type_keyboard())
     await state.set_state(ContractForm.contractor_type)
 
 
 async def ask_contractor_inn(message: types.Message, state: FSMContext):
-    await message.answer("ИНН исполнителя:", reply_markup=input_choice_keyboard("contractor_inn", "Ввести вручную", "Сгенерировать ИНН"))
-    await state.set_state(ContractForm.contractor_inn_choice)
+    await message.answer("ИНН исполнителя:")
+    await state.set_state(ContractForm.contractor_inn_manual)
 
 
 async def ask_contractor_ogrn(message: types.Message, state: FSMContext):
-    await message.answer("ОГРН/ОГРНИП исполнителя:", reply_markup=input_choice_keyboard("contractor_ogrn", "Ввести вручную", "Сгенерировать ОГРН(ИП)"))
-    await state.set_state(ContractForm.contractor_ogrn_choice)
+    await message.answer("ОГРН/ОГРНИП исполнителя:")
+    await state.set_state(ContractForm.contractor_ogrn_manual)
 
 
 async def ask_contractor_address(message: types.Message, state: FSMContext):
-    await message.answer("Юридический адрес исполнителя:", reply_markup=address_choice_keyboard("contractor_address"))
+    await message.answer(
+        "Юридический адрес исполнителя. Отправьте адрес текстом или нажмите кнопку ниже, чтобы поделиться геолокацией.",
+        reply_markup=location_reply_keyboard(),
+    )
     await state.set_state(ContractForm.contractor_address_choice)
 
 
@@ -211,37 +351,49 @@ async def ask_contractor_bank(message: types.Message, state: FSMContext):
 
 
 async def ask_contractor_bik(message: types.Message, state: FSMContext):
-    await message.answer("БИК исполнителя:", reply_markup=input_choice_keyboard("contractor_bik", "Ввести вручную", "Сгенерировать БИК"))
-    await state.set_state(ContractForm.contractor_bik_choice)
+    await message.answer("БИК исполнителя:")
+    await state.set_state(ContractForm.contractor_bik_manual)
 
 
 async def ask_contractor_corr(message: types.Message, state: FSMContext):
-    await message.answer("к/с исполнителя:", reply_markup=input_choice_keyboard("contractor_corr", "Ввести вручную", "Сгенерировать к/с"))
-    await state.set_state(ContractForm.contractor_corr_choice)
+    await message.answer("к/с исполнителя:")
+    await state.set_state(ContractForm.contractor_corr_manual)
 
 
 async def ask_contractor_settlement(message: types.Message, state: FSMContext):
-    await message.answer("р/с исполнителя:", reply_markup=input_choice_keyboard("contractor_settlement", "Ввести вручную", "Сгенерировать р/с"))
-    await state.set_state(ContractForm.contractor_settlement_choice)
+    await message.answer("р/с исполнителя:")
+    await state.set_state(ContractForm.contractor_settlement_manual)
+
+
+async def ask_project_description(message: types.Message, state: FSMContext):
+    await message.answer(
+        "Кратко опишите проект: что именно необходимо разработать."
+    )
+    await state.set_state(ContractForm.project_description)
 
 
 @dp.message(Command("start"))
 async def start_handler(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("Выберите город:", reply_markup=city_keyboard())
-    await state.set_state(ContractForm.city_choice)
+    await message.answer(
+        "Привет, я бот-составитель договоров на разработку ПО. Чтобы составить договор, мне нужны реквизиты сторон и описание самого ПО.",
+    )
+    await message.answer(
+        "Для начала нужно выбрать, кто с кем договаривается. Выберите тип заказчика.",
+        reply_markup=legal_type_keyboard("customer_type"),
+    )
+    await state.set_state(ContractForm.customer_type)
 
 
 @dp.callback_query(ContractForm.city_choice, F.data.startswith("city:"))
 async def city_choice_handler(callback: types.CallbackQuery, state: FSMContext):
-    choice = callback.data.split(":", maxsplit=1)[1]
     await callback.answer()
+    choice = callback.data.split(":", maxsplit=1)[1]
 
     if choice == "moscow":
         await state.update_data(city="Москва")
         await callback.message.edit_text("Город: Москва")
-        await callback.message.answer("Тип заказчика:", reply_markup=legal_type_keyboard("customer_type"))
-        await state.set_state(ContractForm.customer_type)
+        await ask_project_description(callback.message, state)
         return
 
     await callback.message.edit_text("Город: выбран ручной ввод")
@@ -252,19 +404,27 @@ async def city_choice_handler(callback: types.CallbackQuery, state: FSMContext):
 @dp.message(ContractForm.city_custom)
 async def city_custom_handler(message: types.Message, state: FSMContext):
     await state.update_data(city=(message.text or "").strip())
-    await message.answer("Тип заказчика:", reply_markup=legal_type_keyboard("customer_type"))
-    await state.set_state(ContractForm.customer_type)
+    await ask_project_description(message, state)
 
 
 @dp.callback_query(ContractForm.customer_type, F.data.startswith("customer_type:"))
 async def customer_type_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     selected_map = {"ooo": "ООО", "ip": "ИП", "self": "Самозанятый"}
     selected_value = selected_map[callback.data.split(":", maxsplit=1)[1]]
 
+    if selected_value != "ООО":
+        await callback.message.edit_text(
+            "Sorry, we currently cannot generate this type of contract. Please select another type.",
+            reply_markup=legal_type_keyboard("customer_type"),
+        )
+        return
+
     await state.update_data(customer_type=selected_value)
     await callback.message.edit_text(f"Тип заказчика: {selected_value}")
-    await callback.message.answer("Введите название компании заказчика или напишите 'LLM', чтобы сгенерировать.")
-    await callback.answer()
+    await callback.message.answer(
+        "Введите название компании, например, T2Mobile."
+    )
     await state.set_state(ContractForm.customer_company)
 
 
@@ -272,30 +432,56 @@ async def customer_type_handler(callback: types.CallbackQuery, state: FSMContext
 async def customer_company_handler(message: types.Message, state: FSMContext):
     company_name = "Компания, сгенерированная LLM" if (message.text or "").lower() == "llm" else message.text
     await state.update_data(customer_company_name=company_name)
-    await message.answer("Введите ФИО представителя заказчика:")
+    await message.answer("Введите ФИО представителя заказчика.")
     await state.set_state(ContractForm.customer_representative)
 
 
 @dp.message(ContractForm.customer_representative)
 async def customer_representative_handler(message: types.Message, state: FSMContext):
     await state.update_data(customer_representative_name=message.text)
-    await message.answer("ИНН заказчика:", reply_markup=input_choice_keyboard("customer_inn", "Ввести вручную", "Сгенерировать ИНН"))
+    await message.answer(
+        "Как заполнить юридические реквизиты заказчика?",
+        reply_markup=input_choice_keyboard("customer_inn", "Ввести вручную", "Сгенерировать автоматически"),
+    )
     await state.set_state(ContractForm.customer_inn_choice)
 
 
 @dp.callback_query(ContractForm.customer_inn_choice, F.data.startswith("customer_inn:"))
 async def customer_inn_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     if choice == "auto":
+        data = await state.get_data()
+        legal_type = data.get("customer_type", "ООО")
+
         inn = generate_inn()
-        await state.update_data(customer_inn=inn)
-        await callback.message.edit_text(f"ИНН заказчика: {inn} (сгенерирован)")
-        await ask_customer_ogrn(callback.message, state)
+        ogrn = generate_ogrn(legal_type)
+        bik = generate_digits(9)
+        correspondent = generate_digits(20)
+        settlement = generate_digits(20)
+
+        update_payload = {
+            "customer_requisites_mode": "auto",
+            "customer_inn": inn,
+            "customer_ogrn_or_ogrnip": ogrn,
+            "customer_bik": bik,
+            "customer_correspondent_account": correspondent,
+            "customer_settlement_account": settlement,
+        }
+
+        if legal_type == "ООО":
+            update_payload["customer_kpp"] = generate_digits(9)
+
+        await state.update_data(**update_payload)
+
+        await callback.message.edit_text("Реквизиты заказчика будут сформированы автоматически.")
+        await callback.message.answer("Теперь укажем юридический адрес и банк заказчика.")
+        await ask_customer_address(callback.message, state)
     else:
-        await callback.message.edit_text("ИНН заказчика: выбран ручной ввод")
-        await callback.message.answer("Введите ИНН заказчика:")
+        await state.update_data(customer_requisites_mode="manual")
+        await callback.message.edit_text("Выбран ручной ввод реквизитов заказчика.")
+        await callback.message.answer("Введите ИНН заказчика.")
         await state.set_state(ContractForm.customer_inn_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.customer_inn_manual)
@@ -306,6 +492,7 @@ async def customer_inn_manual_handler(message: types.Message, state: FSMContext)
 
 @dp.callback_query(ContractForm.customer_ogrn_choice, F.data.startswith("customer_ogrn:"))
 async def customer_ogrn_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     legal_type = (await state.get_data()).get("customer_type", "ООО")
     if choice == "auto":
@@ -315,9 +502,8 @@ async def customer_ogrn_choice_handler(callback: types.CallbackQuery, state: FSM
         await ask_customer_address(callback.message, state)
     else:
         await callback.message.edit_text("ОГРН/ОГРНИП заказчика: выбран ручной ввод")
-        await callback.message.answer("Введите ОГРН/ОГРНИП заказчика:")
+        await callback.message.answer("Введите ОГРН или ОГРНИП заказчика.")
         await state.set_state(ContractForm.customer_ogrn_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.customer_ogrn_manual)
@@ -326,24 +512,32 @@ async def customer_ogrn_manual_handler(message: types.Message, state: FSMContext
     await ask_customer_address(message, state)
 
 
-@dp.callback_query(ContractForm.customer_address_choice, F.data.startswith("customer_address:"))
-async def customer_address_choice_handler(callback: types.CallbackQuery, state: FSMContext):
-    choice = callback.data.split(":", maxsplit=1)[1]
-    if choice == "manual":
-        await callback.message.edit_text("Юридический адрес заказчика: выбран ручной ввод")
-        await callback.message.answer("Введите юридический адрес заказчика:")
-        await state.set_state(ContractForm.customer_address_manual)
-    else:
-        await callback.message.edit_text("Отправьте геолокацию заказчика (через Telegram location).")
-    await callback.answer()
-
-
 @dp.message(ContractForm.customer_address_choice, F.location)
 async def customer_address_location_handler(message: types.Message, state: FSMContext):
     loc = message.location
-    address = reverse_geocode(loc.latitude, loc.longitude)
-    await state.update_data(customer_legal_address=address)
-    await message.answer(f"Геолокация получена. Определённый адрес: {address}")
+    formatted = await reverse_geocode_address(loc.latitude, loc.longitude)
+    if formatted:
+        await state.update_data(customer_legal_address=formatted)
+        await message.answer(
+            f"Определён юридический адрес заказчика: {formatted}",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await ask_customer_bank(message, state)
+    else:
+        await message.answer(
+            "Адрес не удалось определить автоматически. Введите его вручную.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        # Остаёмся в состоянии ContractForm.customer_address_choice и ждём текстовый ввод
+
+
+@dp.message(ContractForm.customer_address_choice, F.text)
+async def customer_address_text_handler(message: types.Message, state: FSMContext):
+    await state.update_data(customer_legal_address=message.text)
+    await message.answer(
+        "Юридический адрес заказчика сохранен.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
     await ask_customer_bank(message, state)
 
 
@@ -355,7 +549,9 @@ async def customer_address_manual_handler(message: types.Message, state: FSMCont
 
 @dp.callback_query(ContractForm.customer_bank_choice, F.data.startswith("customer_bank:"))
 async def customer_bank_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     selected = callback.data.split(":", maxsplit=1)[1]
+    data = await state.get_data()
     bank_map = {"t_bank": "Т-Банк", "sber": "Сбербанк", "alfa": "Альфа-Банк"}
     if selected == "manual":
         await callback.message.edit_text("Банк заказчика: выбран ручной ввод")
@@ -364,8 +560,13 @@ async def customer_bank_choice_handler(callback: types.CallbackQuery, state: FSM
     else:
         await state.update_data(customer_bank=bank_map[selected])
         await callback.message.edit_text(f"Банк заказчика: {bank_map[selected]}")
-        await ask_customer_bik(callback.message, state)
-    await callback.answer()
+        # In auto requisites mode, all numeric fields are already generated;
+        # proceed directly to contractor block without asking BIK/corr/settlement.
+        if data.get("customer_requisites_mode") == "auto":
+            await callback.message.answer("Отлично, данные заказчика полностью сформированы.")
+            await ask_contractor_type(callback.message, state)
+        else:
+            await ask_customer_bik(callback.message, state)
 
 
 @dp.message(ContractForm.customer_bank_manual)
@@ -376,6 +577,7 @@ async def customer_bank_manual_handler(message: types.Message, state: FSMContext
 
 @dp.callback_query(ContractForm.customer_bik_choice, F.data.startswith("customer_bik:"))
 async def customer_bik_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     if choice == "auto":
         value = generate_digits(9)
@@ -386,7 +588,6 @@ async def customer_bik_choice_handler(callback: types.CallbackQuery, state: FSMC
         await callback.message.edit_text("БИК заказчика: выбран ручной ввод")
         await callback.message.answer("Введите БИК заказчика:")
         await state.set_state(ContractForm.customer_bik_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.customer_bik_manual)
@@ -397,17 +598,17 @@ async def customer_bik_manual_handler(message: types.Message, state: FSMContext)
 
 @dp.callback_query(ContractForm.customer_corr_choice, F.data.startswith("customer_corr:"))
 async def customer_corr_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     if choice == "auto":
         value = generate_digits(20)
         await state.update_data(customer_correspondent_account=value)
-        await callback.message.edit_text(f"к/с заказчика: {value} (сгенерирован)")
+        await callback.message.edit_text(f"Корреспондентский счет: {value} (сгенерирован)")
         await ask_customer_settlement(callback.message, state)
     else:
-        await callback.message.edit_text("к/с заказчика: выбран ручной ввод")
-        await callback.message.answer("Введите к/с заказчика:")
+        await callback.message.edit_text("Корреспондентский счет: выбран ручной ввод")
+        await callback.message.answer("Введите корреспондентский счет")
         await state.set_state(ContractForm.customer_corr_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.customer_corr_manual)
@@ -418,17 +619,17 @@ async def customer_corr_manual_handler(message: types.Message, state: FSMContext
 
 @dp.callback_query(ContractForm.customer_settlement_choice, F.data.startswith("customer_settlement:"))
 async def customer_settlement_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     if choice == "auto":
         value = generate_digits(20)
         await state.update_data(customer_settlement_account=value)
-        await callback.message.edit_text(f"р/с заказчика: {value} (сгенерирован)")
+        await callback.message.edit_text(f"Расчетный счет: {value} (сгенерирован)")
         await ask_contractor_type(callback.message, state)
     else:
-        await callback.message.edit_text("р/с заказчика: выбран ручной ввод")
-        await callback.message.answer("Введите р/с заказчика:")
+        await callback.message.edit_text("Расчетный счет: выбран ручной ввод")
+        await callback.message.answer("Введите расчетный счет")
         await state.set_state(ContractForm.customer_settlement_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.customer_settlement_manual)
@@ -439,56 +640,105 @@ async def customer_settlement_manual_handler(message: types.Message, state: FSMC
 
 @dp.callback_query(ContractForm.customer_kpp_choice, F.data.startswith("customer_kpp:"))
 async def customer_kpp_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     if choice == "auto":
         kpp = generate_digits(9)
         await state.update_data(customer_kpp=kpp)
         await callback.message.edit_text(f"КПП заказчика: {kpp} (сгенерирован)")
-        await callback.message.answer("Тип исполнителя:", reply_markup=legal_type_keyboard("contractor_type"))
+        await callback.message.answer("Тип исполнителя:", reply_markup=contractor_type_keyboard())
         await state.set_state(ContractForm.contractor_type)
     else:
         await callback.message.edit_text("КПП заказчика: выбран ручной ввод")
         await callback.message.answer("Введите КПП заказчика:")
         await state.set_state(ContractForm.customer_kpp_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.customer_kpp_manual)
 async def customer_kpp_manual_handler(message: types.Message, state: FSMContext):
     await state.update_data(customer_kpp=message.text)
-    await message.answer("Тип исполнителя:", reply_markup=legal_type_keyboard("contractor_type"))
+    await message.answer("Тип исполнителя:", reply_markup=contractor_type_keyboard())
     await state.set_state(ContractForm.contractor_type)
 
 
 @dp.callback_query(ContractForm.contractor_type, F.data.startswith("contractor_type:"))
 async def contractor_type_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     selected_map = {"ooo": "ООО", "ip": "ИП", "self": "Самозанятый"}
     selected_value = selected_map[callback.data.split(":", maxsplit=1)[1]]
 
+    if selected_value != "ИП":
+        await callback.message.edit_text(
+            "Sorry, we currently cannot generate this type of contract. Please select another type.",
+            reply_markup=contractor_type_keyboard(),
+        )
+        return
+
     await state.update_data(contractor_type=selected_value)
     await callback.message.edit_text(f"Тип исполнителя: {selected_value}")
-    await callback.message.answer("Введите название компании исполнителя или напишите 'LLM', чтобы сгенерировать.")
-    await callback.answer()
-    await state.set_state(ContractForm.contractor_company)
-
-
-@dp.message(ContractForm.contractor_company)
-async def contractor_company_handler(message: types.Message, state: FSMContext):
-    company_name = "Исполнитель, сгенерированный LLM" if (message.text or "").lower() == "llm" else message.text
-    await state.update_data(contractor_company_name=company_name)
-
-    await message.answer("Введите ФИО представителя исполнителя:")
+    await callback.message.answer("Введите полное ФИО исполнителя (ИП):")
     await state.set_state(ContractForm.contractor_representative)
 
 
 @dp.message(ContractForm.contractor_representative)
 async def contractor_representative_handler(message: types.Message, state: FSMContext):
-    await state.update_data(contractor_representative_name=message.text)
-    await ask_contractor_inn(message, state)
+    full_name = (message.text or "").strip()
+    if not full_name:
+        await message.answer("Пожалуйста, введите полное ФИО исполнителя (ИП).")
+        return
+
+    parts = full_name.split()
+    surname = parts[0] if parts else ""
+    if surname:
+        await state.update_data(contractor_company_name=f"ИП {surname}")
+
+    await state.update_data(contractor_representative_name=full_name)
+    await message.answer(
+        "Как вы хотите заполнить юридические реквизиты исполнителя?",
+        reply_markup=input_choice_keyboard(
+            "contractor_requisites",
+            "Ввести вручную",
+            "Сгенерировать автоматически",
+        ),
+    )
+    await state.set_state(ContractForm.contractor_requisites_choice)
+
+
+@dp.callback_query(ContractForm.contractor_requisites_choice, F.data.startswith("contractor_requisites:"))
+async def contractor_requisites_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    choice = callback.data.split(":", maxsplit=1)[1]
+    if choice == "auto":
+        data = await state.get_data()
+        legal_type = data.get("contractor_type", "ИП")
+
+        inn = generate_inn()
+        ogrn = generate_ogrn(legal_type)
+        bik = generate_digits(9)
+        correspondent = generate_digits(20)
+        settlement = generate_digits(20)
+
+        await state.update_data(
+            contractor_requisites_mode="auto",
+            contractor_inn=inn,
+            contractor_ogrn_or_ogrnip=ogrn,
+            contractor_bik=bik,
+            contractor_correspondent_account=correspondent,
+            contractor_settlement_account=settlement,
+        )
+        await callback.message.edit_text("Реквизиты исполнителя будут сгенерированы автоматически.")
+        await callback.message.answer("Теперь укажем юридический адрес и банк исполнителя.")
+        await ask_contractor_address(callback.message, state)
+    else:
+        await state.update_data(contractor_requisites_mode="manual")
+        await callback.message.edit_text("Реквизиты исполнителя: выбран ручной ввод.")
+        await callback.message.answer("Введите ИНН исполнителя:")
+        await state.set_state(ContractForm.contractor_inn_manual)
 
 
 @dp.callback_query(ContractForm.contractor_inn_choice, F.data.startswith("contractor_inn:"))
 async def contractor_inn_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     if choice == "auto":
         value = generate_inn()
@@ -499,7 +749,6 @@ async def contractor_inn_choice_handler(callback: types.CallbackQuery, state: FS
         await callback.message.edit_text("ИНН исполнителя: выбран ручной ввод")
         await callback.message.answer("Введите ИНН исполнителя:")
         await state.set_state(ContractForm.contractor_inn_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.contractor_inn_manual)
@@ -510,6 +759,7 @@ async def contractor_inn_manual_handler(message: types.Message, state: FSMContex
 
 @dp.callback_query(ContractForm.contractor_ogrn_choice, F.data.startswith("contractor_ogrn:"))
 async def contractor_ogrn_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     legal_type = (await state.get_data()).get("contractor_type", "ИП")
     if choice == "auto":
@@ -521,7 +771,6 @@ async def contractor_ogrn_choice_handler(callback: types.CallbackQuery, state: F
         await callback.message.edit_text("ОГРН/ОГРНИП исполнителя: выбран ручной ввод")
         await callback.message.answer("Введите ОГРН/ОГРНИП исполнителя:")
         await state.set_state(ContractForm.contractor_ogrn_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.contractor_ogrn_manual)
@@ -530,24 +779,32 @@ async def contractor_ogrn_manual_handler(message: types.Message, state: FSMConte
     await ask_contractor_address(message, state)
 
 
-@dp.callback_query(ContractForm.contractor_address_choice, F.data.startswith("contractor_address:"))
-async def contractor_address_choice_handler(callback: types.CallbackQuery, state: FSMContext):
-    choice = callback.data.split(":", maxsplit=1)[1]
-    if choice == "manual":
-        await callback.message.edit_text("Юридический адрес исполнителя: выбран ручной ввод")
-        await callback.message.answer("Введите юридический адрес исполнителя:")
-        await state.set_state(ContractForm.contractor_address_manual)
-    else:
-        await callback.message.edit_text("Отправьте геолокацию исполнителя (через Telegram location).")
-    await callback.answer()
-
-
 @dp.message(ContractForm.contractor_address_choice, F.location)
 async def contractor_address_location_handler(message: types.Message, state: FSMContext):
     loc = message.location
-    address = reverse_geocode(loc.latitude, loc.longitude)
-    await state.update_data(contractor_legal_address=address)
-    await message.answer(f"Геолокация получена. Определённый адрес: {address}")
+    formatted = await reverse_geocode_address(loc.latitude, loc.longitude)
+    if formatted:
+        await state.update_data(contractor_legal_address=formatted)
+        await message.answer(
+            f"Определён юридический адрес исполнителя: {formatted}",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await ask_contractor_bank(message, state)
+    else:
+        await message.answer(
+            "Не удалось определить адрес по геолокации. Пожалуйста, введите юридический адрес исполнителя вручную.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        # Остаёмся в состоянии ContractForm.contractor_address_choice и ждём текстовый ввод
+
+
+@dp.message(ContractForm.contractor_address_choice, F.text)
+async def contractor_address_text_handler(message: types.Message, state: FSMContext):
+    await state.update_data(contractor_legal_address=message.text)
+    await message.answer(
+        "Юридический адрес исполнителя сохранен.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
     await ask_contractor_bank(message, state)
 
 
@@ -559,7 +816,9 @@ async def contractor_address_manual_handler(message: types.Message, state: FSMCo
 
 @dp.callback_query(ContractForm.contractor_bank_choice, F.data.startswith("contractor_bank:"))
 async def contractor_bank_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     selected = callback.data.split(":", maxsplit=1)[1]
+    data = await state.get_data()
     bank_map = {"t_bank": "Т-Банк", "sber": "Сбербанк", "alfa": "Альфа-Банк"}
     if selected == "manual":
         await callback.message.edit_text("Банк исполнителя: выбран ручной ввод")
@@ -568,8 +827,14 @@ async def contractor_bank_choice_handler(callback: types.CallbackQuery, state: F
     else:
         await state.update_data(contractor_bank=bank_map[selected])
         await callback.message.edit_text(f"Банк исполнителя: {bank_map[selected]}")
-        await ask_contractor_bik(callback.message, state)
-    await callback.answer()
+        # In auto requisites mode, all numeric fields are already generated;
+        # proceed directly to city selection without asking BIK/corr/settlement.
+        if data.get("contractor_requisites_mode") == "auto":
+            await callback.message.answer("Отлично, персональные данные сторон сформированы.")
+            await callback.message.answer("Остался один шаг. Выберите город.", reply_markup=city_keyboard())
+            await state.set_state(ContractForm.city_choice)
+        else:
+            await ask_contractor_bik(callback.message, state)
 
 
 @dp.message(ContractForm.contractor_bank_manual)
@@ -580,6 +845,7 @@ async def contractor_bank_manual_handler(message: types.Message, state: FSMConte
 
 @dp.callback_query(ContractForm.contractor_bik_choice, F.data.startswith("contractor_bik:"))
 async def contractor_bik_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     if choice == "auto":
         value = generate_digits(9)
@@ -590,7 +856,6 @@ async def contractor_bik_choice_handler(callback: types.CallbackQuery, state: FS
         await callback.message.edit_text("БИК исполнителя: выбран ручной ввод")
         await callback.message.answer("Введите БИК исполнителя:")
         await state.set_state(ContractForm.contractor_bik_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.contractor_bik_manual)
@@ -601,6 +866,7 @@ async def contractor_bik_manual_handler(message: types.Message, state: FSMContex
 
 @dp.callback_query(ContractForm.contractor_corr_choice, F.data.startswith("contractor_corr:"))
 async def contractor_corr_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     if choice == "auto":
         value = generate_digits(20)
@@ -611,7 +877,6 @@ async def contractor_corr_choice_handler(callback: types.CallbackQuery, state: F
         await callback.message.edit_text("к/с исполнителя: выбран ручной ввод")
         await callback.message.answer("Введите к/с исполнителя:")
         await state.set_state(ContractForm.contractor_corr_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.contractor_corr_manual)
@@ -622,25 +887,25 @@ async def contractor_corr_manual_handler(message: types.Message, state: FSMConte
 
 @dp.callback_query(ContractForm.contractor_settlement_choice, F.data.startswith("contractor_settlement:"))
 async def contractor_settlement_choice_handler(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
     choice = callback.data.split(":", maxsplit=1)[1]
     if choice == "auto":
         value = generate_digits(20)
         await state.update_data(contractor_settlement_account=value)
         await callback.message.edit_text(f"р/с исполнителя: {value} (сгенерирован)")
-        await callback.message.answer("Кратко опишите проект (1–5 предложений):")
-        await state.set_state(ContractForm.project_description)
+        await callback.message.answer("Остался один шаг. Выберите город.", reply_markup=city_keyboard())
+        await state.set_state(ContractForm.city_choice)
     else:
         await callback.message.edit_text("р/с исполнителя: выбран ручной ввод")
         await callback.message.answer("Введите р/с исполнителя:")
         await state.set_state(ContractForm.contractor_settlement_manual)
-    await callback.answer()
 
 
 @dp.message(ContractForm.contractor_settlement_manual)
 async def contractor_settlement_manual_handler(message: types.Message, state: FSMContext):
     await state.update_data(contractor_settlement_account=message.text)
-    await message.answer("Кратко опишите проект (1–5 предложений):")
-    await state.set_state(ContractForm.project_description)
+    await message.answer("Остался один шаг. Выберите город.", reply_markup=city_keyboard())
+    await state.set_state(ContractForm.city_choice)
 
 
 @dp.message(ContractForm.project_description)
