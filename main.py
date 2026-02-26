@@ -1,13 +1,26 @@
 from pathlib import Path
 import json
+from dotenv import load_dotenv
 import os
 import re
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from openai import (
+    APIConnectionError,
+    APIError,
+    BadRequestError,
+    APITimeoutError,
+    AuthenticationError,
+    OpenAI,
+    PermissionDeniedError,
+)
+from openai import APIConnectionError, APIError, APITimeoutError, OpenAI
+from openai import OpenAI
 from pydantic import BaseModel
 
 app = FastAPI()
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_PATH = BASE_DIR / "agreement_clean.txt"
@@ -18,6 +31,7 @@ LLM_MODELS = [
     for model in os.getenv("OPENAI_MODELS", os.getenv("OPENAI_MODEL", "gpt-5-mini,gpt-4.1-mini")).split(",")
     if model.strip()
 ]
+LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
 SYSTEM_PROMPT = """You are a legally oriented system analyst.
 Based on the project description, generate strictly valid JSON.
@@ -235,6 +249,7 @@ def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
     except ImportError:
         raise HTTPException(status_code=503, detail="OpenAI client is not installed on backend")
 
+    load_dotenv()
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not set")
@@ -308,6 +323,49 @@ def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
                 f"Details: {' | '.join(bad_request_details)}"
             ),
         )
+
+    client = OpenAI(api_key=api_key)
+    user_prompt = f"Project description:\n{project_description}"
+
+    for _ in range(2):
+        try:
+            completion = client.responses.create(
+                model="gpt-5-mini",
+                input=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except (APIConnectionError, APITimeoutError):
+            raise HTTPException(status_code=502, detail="OpenAI API connection error")
+        except AuthenticationError:
+            raise HTTPException(status_code=401, detail="OpenAI API authentication failed")
+        except PermissionDeniedError:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"OpenAI access denied for model '{LLM_MODEL}'. "
+                    "Grant access to this model or set OPENAI_MODEL to an allowed model."
+                ),
+            )
+        except APIError as exc:
+            raise HTTPException(status_code=502, detail=f"OpenAI API error: {exc.__class__.__name__}")
+        except APIError as exc:
+            raise HTTPException(status_code=502, detail=f"OpenAI API error: {exc.__class__.__name__}")
+        completion = client.responses.create(
+            model="gpt-5-mini",
+            temperature=0,
+            input=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+
+        text = completion.output_text.strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            continue
 
     raise HTTPException(status_code=502, detail="Failed to parse model JSON response")
 
