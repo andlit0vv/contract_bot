@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from openai import APIConnectionError, APIError, APITimeoutError, OpenAI
+from openai import OpenAI
 from pydantic import BaseModel
 
 app = FastAPI()
@@ -241,6 +242,14 @@ def request_llm_contract_vars(project_description: str) -> dict[str, Any]:
             raise HTTPException(status_code=502, detail="OpenAI API connection error")
         except APIError as exc:
             raise HTTPException(status_code=502, detail=f"OpenAI API error: {exc.__class__.__name__}")
+        completion = client.responses.create(
+            model="gpt-5-mini",
+            temperature=0,
+            input=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
 
         text = completion.output_text.strip()
         try:
