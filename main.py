@@ -1,14 +1,93 @@
+import os
 from pathlib import Path
 import re
 
 from fastapi import FastAPI, HTTPException
+from openai import OpenAI
 from pydantic import BaseModel
+
+from validation import ValidationError, parse_and_validate_project_json
 
 app = FastAPI()
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_PATH = BASE_DIR / "agreement_clean.txt"
 OUTPUT_PATH = BASE_DIR / "agreement_filled.txt"
+
+OPENAI_MODEL = "gpt-5-mini"
+OPENAI_MAX_RETRIES = 3
+PROJECT_FACTS = """Reference characteristics from contract template:
+- Product type: mobile application development.
+- Total duration: 110 working days from prepayment.
+- Work is split into 3 stages.
+- Payment flow details include a prepayment that reaches 50% before active work.
+- Intellectual property: exclusive rights transfer to the client.
+- Access credentials/accounts are transferred to the client after completion.
+- Delay penalty: 0.5% per day with a cap of 10%.
+- Warranty obligations are present and should be reflected in months.
+"""
+
+SYSTEM_PROMPT = """You are a system analyst in software development.
+
+Your task is to analyze a brief project description and return strictly valid JSON with project parameters for generating a software development contract.
+
+Do not generate a contract.
+Do not provide explanations.
+The response must contain only JSON, with no text outside the JSON.
+
+If data is insufficient, make professional assumptions based on standard software development practices in Russia,
+but keep the resulting values aligned with the reference contract characteristics.
+
+Forbidden:
+
+adding any text outside JSON
+
+modifying the JSON structure
+
+adding or removing fields
+
+violating required schema constraints
+
+Numeric requirements:
+
+total_duration_working_days — integer, must be 110
+
+stages_count — integer, must be 3
+
+stage payment percentages — must sum exactly to 100
+
+stage duration sum — must equal total_duration_working_days
+
+prepayment_percent — integer, not greater than 50
+
+penalty_percent_per_day — from 0.1 to 0.5
+
+penalty_cap_percent — exactly 10
+
+Required JSON structure:
+{
+  "project_summary": "",
+  "product_type": "",
+  "work_scope_items": [""],
+  "total_duration_working_days": 0,
+  "stages_count": 0,
+  "stages": [
+    {
+      "name": "",
+      "duration_working_days": 0,
+      "payment_percent": 0
+    }
+  ],
+  "prepayment_percent": 0,
+  "ip_transfer_model": "exclusive_transfer",
+  "access_transfer_required": true,
+  "penalty_percent_per_day": 0.0,
+  "penalty_cap_percent": 10,
+  "warranty_claim_window_months": 0
+}
+
+Use explicit data from the description if provided. Otherwise, estimate independently.
+"""
 
 
 class ContractData(BaseModel):
@@ -236,6 +315,62 @@ def render_template(template_text: str, context: dict) -> str:
     return rendered
 
 
+def _extract_response_text(response) -> str:
+    if getattr(response, "output_text", None):
+        return response.output_text
+    return "".join(
+        chunk.text
+        for item in getattr(response, "output", [])
+        if getattr(item, "type", "") == "message"
+        for chunk in getattr(item, "content", [])
+        if getattr(chunk, "type", "") == "output_text"
+    )
+
+
+def generate_project_characteristics(project_description: str) -> dict:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=api_key)
+    total_tokens_spent = 0
+    last_error = "Unknown error"
+
+    for attempt in range(1, OPENAI_MAX_RETRIES + 1):
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            input=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        "Project description:\n"
+                        f"{project_description}\n\n"
+                        "Contract reference characteristics:\n"
+                        f"{PROJECT_FACTS}"
+                    ),
+                },
+            ],
+        )
+
+        usage = getattr(response, "usage", None)
+        if usage and getattr(usage, "total_tokens", None):
+            total_tokens_spent += usage.total_tokens
+
+        response_text = _extract_response_text(response)
+
+        try:
+            validated_payload = parse_and_validate_project_json(response_text)
+            print(f"[OpenAI] total tokens spent: {total_tokens_spent}")
+            return validated_payload
+        except ValidationError as exc:
+            last_error = str(exc)
+            print(f"[OpenAI] validation failed on attempt {attempt}: {last_error}")
+
+    print(f"[OpenAI] total tokens spent before failure: {total_tokens_spent}")
+    raise HTTPException(status_code=422, detail=f"LLM JSON validation failed: {last_error}")
+
+
 # -----------------------
 # API
 # -----------------------
@@ -254,6 +389,8 @@ def generate_contract(data: ContractData):
 
     context = build_context(payload)
 
+    project_characteristics = generate_project_characteristics(payload.get("project_description", ""))
+
     required_vars = extract_template_variables(template_text)
     for var_name in required_vars:
         context.setdefault(var_name, "")
@@ -268,5 +405,6 @@ def generate_contract(data: ContractData):
     return {
         "status": "ok",
         "output_file": OUTPUT_PATH.name,
-        "morphology": "disabled"
+        "morphology": "disabled",
+        "project_characteristics": project_characteristics,
     }
