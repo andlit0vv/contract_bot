@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import json
 import random
-
+import os
 import aiohttp
 import requests
 from aiogram import Bot, Dispatcher, F, types
@@ -20,6 +20,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 API_TOKEN = "8698344682:AAGjNOJcbbMVcTWMHy2HyPg42j_k8ExGF1w"
 BACKEND_URL = "http://127.0.0.1:8000/generate-contract"
+BACKEND_TIMEOUT_SECONDS = int(os.getenv("BACKEND_TIMEOUT_SECONDS", "180"))
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -943,13 +944,27 @@ async def project_description_handler(message: types.Message, state: FSMContext)
     print(json.dumps(contract_payload, indent=4, ensure_ascii=False))
 
     try:
-        response = requests.post(BACKEND_URL, json=contract_payload, timeout=10)
+        response = requests.post(
+            BACKEND_URL,
+            json=contract_payload,
+            timeout=BACKEND_TIMEOUT_SECONDS,
+        )
         if response.status_code == 200:
             await message.answer("Данные успешно сохранены и отправлены на backend.")
         else:
             await message.answer(f"Backend вернул ошибку: {response.status_code} {response.text}")
-    except Exception:
-        await message.answer("Backend недоступен. Попробуйте позже.")
+    except requests.exceptions.Timeout:
+        await message.answer(
+            "Backend не успел ответить вовремя. "
+            "Увеличьте BACKEND_TIMEOUT_SECONDS или проверьте скорость ответа OpenAI."
+        )
+    except requests.exceptions.ConnectionError:
+        await message.answer(
+            "Не удалось подключиться к backend. "
+            "Проверьте, что uvicorn запущен и доступен по адресу http://127.0.0.1:8000."
+        )
+    except requests.exceptions.RequestException as exc:
+        await message.answer(f"Ошибка запроса к backend: {exc}")
 
     await state.clear()
 
