@@ -243,13 +243,6 @@ def to_initials(full_name: str) -> str:
 def build_context(payload: dict) -> dict:
     fio = payload.get("contractor_representative_name", "")
     customer_fio = payload.get("customer_representative_name", "")
-    project_description = payload.get("project_description", "")
-    project_points = [item.strip(" -\t") for item in project_description.split(";") if item.strip()]
-    if not project_points and project_description.strip():
-        project_points = [project_description.strip()]
-    if not project_points:
-        project_points = ["Объем работ уточняется в техническом задании."]
-
     contractor_intro = f"{payload.get('contractor_type', '')} {fio}".strip()
     if payload.get("contractor_type") == "ИП":
         contractor_intro = f"ИП {to_initials(fio)}".strip()
@@ -260,7 +253,6 @@ def build_context(payload: dict) -> dict:
         "customer_representative_name_genitive": inflect_fio_case(customer_fio, "gent"),
         "contractor_fio_full": fio,
         "contractor_ogrnip": payload.get("contractor_ogrn_or_ogrnip", ""),
-        "work_scope": project_points,
         "customer_ogrn": payload.get("customer_ogrn_or_ogrnip", ""),
         "customer_kpp": payload.get("customer_kpp", "Не указано"),
         "contractor_address": payload.get("contractor_legal_address", ""),
@@ -284,15 +276,16 @@ def enrich_context_with_project_characteristics(context: dict, project_character
         )
     merged["stage_lines"] = stage_lines
 
+    work_scope_items = project_characteristics.get("work_scope_items")
+    if not isinstance(work_scope_items, list) or not work_scope_items:
+        work_scope_items = ["Объем работ уточняется в техническом задании."]
+    merged["work_scope_items"] = [str(item) for item in work_scope_items]
+
     product_type = str(project_characteristics.get("product_type", "")).lower()
     if "мобиль" in product_type:
         merged["product_genitive"] = "мобильного приложения"
     else:
         merged["product_genitive"] = "программного обеспечения"
-
-    merged["subject_clause"] = (
-        f"Предмет договора: {project_characteristics.get('project_summary', 'Описание проекта уточняется в ТЗ.')}"
-    )
 
     if project_characteristics.get("ip_transfer_model") == "exclusive_transfer":
         merged["ip_transfer_clause"] = (
@@ -313,13 +306,55 @@ def enrich_context_with_project_characteristics(context: dict, project_character
 def validate_template_coverage(template_text: str, context: dict) -> None:
     """Ensure all template placeholders are provided by merged context."""
     required_vars = extract_template_variables(template_text)
-    missing = sorted(name for name in required_vars if name not in context)
+
+    # Loop variables (e.g. {{ item }} in {% for item in work_scope_items %})
+    # are local to loop blocks and must not be required in top-level context.
+    loop_vars = set(
+        re.findall(
+            r"\{%\s*for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+[a-zA-Z_][a-zA-Z0-9_]*\s*%\}",
+            template_text,
+        )
+    )
+
+    missing = sorted(name for name in required_vars if name not in context and name not in loop_vars)
     if missing:
         raise HTTPException(
             status_code=500,
             detail=(
                 "Template placeholders do not match available payload/LLM fields. "
                 f"Missing variables: {missing}"
+            ),
+        )
+
+
+LEGACY_LLM_TEMPLATE_ALIASES = {
+    "work_scope": "work_scope_items",
+    "subject_clause": "project_summary",
+}
+
+
+def validate_llm_template_alignment(template_text: str) -> None:
+    """Reject legacy placeholders so template keeps matching actual LLM JSON field names."""
+    placeholders = extract_template_variables(template_text)
+    loop_iterables = set(
+        re.findall(
+            r"\{%\s*for\s+[a-zA-Z_][a-zA-Z0-9_]*\s+in\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*%\}",
+            template_text,
+        )
+    )
+
+    referenced_names = placeholders.union(loop_iterables)
+    alias_errors = {
+        old: new
+        for old, new in LEGACY_LLM_TEMPLATE_ALIASES.items()
+        if old in referenced_names
+    }
+    if alias_errors:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Template uses outdated LLM placeholder names: "
+                + ", ".join(f"{old} -> {new}" for old, new in sorted(alias_errors.items()))
             ),
         )
 
@@ -448,6 +483,8 @@ def generate_contract(data: ContractData):
         template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    validate_llm_template_alignment(template_text)
 
     project_characteristics = generate_project_characteristics(payload.get("project_description", ""))
     context = enrich_context_with_project_characteristics(
