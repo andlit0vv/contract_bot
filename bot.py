@@ -3,6 +3,8 @@ import datetime
 import json
 import random
 import os
+import shutil
+from pathlib import Path
 
 import aiohttp
 import requests
@@ -11,8 +13,10 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaDocument,
     KeyboardButton,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
@@ -22,6 +26,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 API_TOKEN = "8698344682:AAGjNOJcbbMVcTWMHy2HyPg42j_k8ExGF1w"
 BACKEND_URL = "http://127.0.0.1:8000/generate-contract"
 BACKEND_TIMEOUT_SECONDS = int(os.getenv("BACKEND_TIMEOUT_SECONDS", "180"))
+GENERATED_DOCX_PATH = Path(__file__).resolve().with_name("contractfinal.docx")
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -951,7 +956,30 @@ async def project_description_handler(message: types.Message, state: FSMContext)
             timeout=BACKEND_TIMEOUT_SECONDS,
         )
         if response.status_code == 200:
-            await message.answer("Данные успешно сохранены и отправлены на backend.")
+            backend_payload = response.json()
+            output_file = backend_payload.get("output_file")
+            generated_docx_path = GENERATED_DOCX_PATH
+            if output_file:
+                generated_docx_path = Path(__file__).resolve().with_name(output_file)
+
+            if not generated_docx_path.exists():
+                await message.answer(
+                    "Договор сформирован, но не удалось найти итоговый DOCX файл для отправки."
+                )
+            else:
+                generated_pdf_path = generated_docx_path.with_suffix(".pdf")
+                shutil.copyfile(generated_docx_path, generated_pdf_path)
+
+                await message.answer(
+                    "Ваш договор готов! Можете скачать его из следующего сообщения"
+                )
+                await bot.send_media_group(
+                    chat_id=message.chat.id,
+                    media=[
+                        InputMediaDocument(media=FSInputFile(str(generated_docx_path))),
+                        InputMediaDocument(media=FSInputFile(str(generated_pdf_path))),
+                    ],
+                )
         else:
             await message.answer(f"Backend вернул ошибку: {response.status_code} {response.text}")
     except requests.exceptions.Timeout:
