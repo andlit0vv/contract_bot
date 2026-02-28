@@ -317,9 +317,6 @@ def extract_loop_variables(template_text: str) -> set[str]:
 def validate_template_coverage(template_vars: set[str], context: dict, loop_vars: set[str]) -> None:
     """Ensure all template placeholders are provided by merged context."""
     missing = sorted(name for name in template_vars if name not in context and name not in loop_vars)
-def validate_template_coverage(template_vars: set[str], context: dict) -> None:
-    """Ensure all template placeholders are provided by merged context."""
-    missing = sorted(name for name in template_vars if name not in context)
     if missing:
         raise HTTPException(
             status_code=500,
@@ -528,8 +525,6 @@ def generate_contract(data: ContractData):
     template_vars = extract_docx_template_variables(document)
     loop_vars = extract_loop_variables(template_text)
     validate_llm_template_alignment(template_text)
-    template_vars = extract_docx_template_variables(document)
-    validate_llm_template_alignment("\n".join(container.text for container in iter_docx_text_containers(document)))
 
     project_characteristics = generate_project_characteristics(payload.get("project_description", ""))
     context = enrich_context_with_project_characteristics(
@@ -538,7 +533,6 @@ def generate_contract(data: ContractData):
     )
 
     validate_template_coverage(template_vars, context, loop_vars)
-    validate_template_coverage(template_vars, context)
     render_docx_template(document, context)
 
     unused_context_keys = sorted(key for key in context.keys() if key not in template_vars)
