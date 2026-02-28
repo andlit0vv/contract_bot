@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 import re
-
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from openai import OpenAI
 from pydantic import BaseModel
@@ -9,22 +9,27 @@ from pydantic import BaseModel
 from validation import ValidationError, parse_and_validate_project_json
 
 app = FastAPI()
-
+load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_PATH = BASE_DIR / "agreement_clean.txt"
 OUTPUT_PATH = BASE_DIR / "agreement_filled.txt"
-
+print(os.getenv("OPENAI_API_KEY"))
 OPENAI_MODEL = "gpt-5-mini"
 OPENAI_MAX_RETRIES = 3
-PROJECT_FACTS = """Reference characteristics from contract template:
-- Product type: mobile application development.
-- Total duration: 110 working days from prepayment.
-- Work is split into 3 stages.
-- Payment flow details include a prepayment that reaches 50% before active work.
-- Intellectual property: exclusive rights transfer to the client.
-- Access credentials/accounts are transferred to the client after completion.
-- Delay penalty: 0.5% per day with a cap of 10%.
-- Warranty obligations are present and should be reflected in months.
+PROJECT_FACTS = """
+Reference contract constraints (must stay within these ranges):
+
+- Product type: software or mobile application development.
+- Work stages count: from 3 to 4 stages.
+- Total duration: typically from 60 to 180 working days.
+- Prepayment: from 30% to 50% of first stage payment.
+- Stage payment percentages: must sum to 100%.
+- Intellectual property model: exclusive rights transfer to the client.
+- Source code transfer: required after full payment.
+- Access credentials/accounts: transferred to the client upon project completion.
+- Delay penalty per day: from 0.1% to 0.5%.
+- Penalty cap: exactly 10%.
+- Warranty period: from 2 to 6 months.
 """
 
 SYSTEM_PROMPT = """You are a system analyst in software development.
@@ -36,33 +41,33 @@ Do not provide explanations.
 The response must contain only JSON, with no text outside the JSON.
 
 If data is insufficient, make professional assumptions based on standard software development practices in Russia,
-but keep the resulting values aligned with the reference contract characteristics.
+while strictly staying within the allowed contract constraint ranges provided in the reference characteristics.
 
 Forbidden:
 
-adding any text outside JSON
-
-modifying the JSON structure
-
-adding or removing fields
-
-violating required schema constraints
+- adding any text outside JSON
+- modifying the JSON structure
+- adding or removing fields
+- violating required schema constraints
+- generating values outside the specified numeric ranges
 
 Numeric requirements:
 
-total_duration_working_days — integer, must be 110
+- total_duration_working_days — integer, must be between 60 and 180 (days)
+- stages_count — integer, must be 3 or 4
+- number of objects in "stages" array must equal stages_count
+- stage payment percentages — must sum exactly to 100
+- stage duration sum — must equal total_duration_working_days
+- prepayment_percent — integer, must be between 30 and 50
+- penalty_percent_per_day — number, must be between 0.1 and 0.5
+- penalty_cap_percent — exactly 10
+- warranty_claim_window_months — integer, must be between 2 and 6
 
-stages_count — integer, must be 3
+Contract logic requirements:
 
-stage payment percentages — must sum exactly to 100
-
-stage duration sum — must equal total_duration_working_days
-
-prepayment_percent — integer, not greater than 50
-
-penalty_percent_per_day — from 0.1 to 0.5
-
-penalty_cap_percent — exactly 10
+- ip_transfer_model must always be "exclusive_transfer"
+- access_transfer_required must always be true
+- product_type must correspond to software or mobile application development
 
 Required JSON structure:
 {
@@ -86,7 +91,9 @@ Required JSON structure:
   "warranty_claim_window_months": 0
 }
 
-Use explicit data from the description if provided. Otherwise, estimate independently.
+Use explicit data from the description if provided.
+If explicit values contradict allowed ranges, adjust them to the nearest valid value within constraints.
+Otherwise, estimate independently but remain realistic and internally consistent.
 """
 
 
