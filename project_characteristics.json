@@ -1,0 +1,46 @@
+{
+  "project_summary": "Разработка мобильного приложения по доставке цветов до двери",
+  "product_type": "mobile application development",
+  "work_scope_items": [
+    "Анализ требований и составление технического задания",
+    "Проектирование архитектуры и базы данных",
+    "UI/UX дизайн мобильного приложения (iOS и Android)",
+    "Разработка серверной части и API",
+    "Разработка мобильных приложений (iOS и Android)",
+    "Интеграция платежных систем и сервисов доставки",
+    "Административная панель для управления заказами и каталогом",
+    "Тестирование (функциональное, интеграционное, нагрузочное)",
+    "Развертывание, настройка хостинга и публикация в магазинах",
+    "Подготовка документации и передача доступа"
+  ],
+  "total_duration_working_days": 120,
+  "stages_count": 4,
+  "stages": [
+    {
+      "name": "Анализ и планирование",
+      "duration_working_days": 15,
+      "payment_percent": 20
+    },
+    {
+      "name": "Дизайн и прототипирование",
+      "duration_working_days": 20,
+      "payment_percent": 20
+    },
+    {
+      "name": "Разработка (сервер и мобильные клиенты)",
+      "duration_working_days": 65,
+      "payment_percent": 45
+    },
+    {
+      "name": "Тестирование, развертывание и передача",
+      "duration_working_days": 20,
+      "payment_percent": 15
+    }
+  ],
+  "prepayment_percent": 40,
+  "ip_transfer_model": "exclusive_transfer",
+  "access_transfer_required": true,
+  "penalty_percent_per_day": 0.2,
+  "penalty_cap_percent": 10,
+  "warranty_claim_window_months": 3
+}
