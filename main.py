@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import re
 from dotenv import load_dotenv
@@ -13,6 +14,8 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_PATH = BASE_DIR / "agreement_clean.txt"
 OUTPUT_PATH = BASE_DIR / "agreement_filled.txt"
+PROJECT_JSON_PATH = BASE_DIR / "project_characteristics.json"
+
 print(os.getenv("OPENAI_API_KEY"))
 OPENAI_MODEL = "gpt-5-mini"
 OPENAI_MAX_RETRIES = 3
@@ -406,12 +409,17 @@ def generate_contract(data: ContractData):
 
     try:
         OUTPUT_PATH.write_text(rendered, encoding="utf-8")
+        PROJECT_JSON_PATH.write_text(
+            json.dumps(project_characteristics, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
     return {
         "status": "ok",
         "output_file": OUTPUT_PATH.name,
+        "project_json_file": PROJECT_JSON_PATH.name,
         "morphology": "disabled",
         "project_characteristics": project_characteristics,
     }
