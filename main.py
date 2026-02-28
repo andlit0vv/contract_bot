@@ -134,6 +134,7 @@ class ContractData(BaseModel):
     contractor_settlement_account: str
 
     vat_type: str
+    price_value: str = "Не указана"
     project_description: str = ""
 
 
