@@ -272,6 +272,58 @@ def build_context(payload: dict) -> dict:
     }
 
 
+def enrich_context_with_project_characteristics(context: dict, project_characteristics: dict) -> dict:
+    """Merge validated LLM JSON into template context and prepare rendered fields."""
+    merged = {**context, **project_characteristics}
+
+    # Human-friendly stage lines for template loop.
+    stage_lines = []
+    for idx, stage in enumerate(project_characteristics.get("stages", []), start=1):
+        stage_lines.append(
+            f"Этап {idx}: {stage['name']} — {stage['duration_working_days']} рабочих дней, оплата {stage['payment_percent']}%."
+        )
+    merged["stage_lines"] = stage_lines
+
+    product_type = str(project_characteristics.get("product_type", "")).lower()
+    if "мобиль" in product_type:
+        merged["product_genitive"] = "мобильного приложения"
+    else:
+        merged["product_genitive"] = "программного обеспечения"
+
+    merged["subject_clause"] = (
+        f"Предмет договора: {project_characteristics.get('project_summary', 'Описание проекта уточняется в ТЗ.')}"
+    )
+
+    if project_characteristics.get("ip_transfer_model") == "exclusive_transfer":
+        merged["ip_transfer_clause"] = (
+            "Исключительные права на результат работ переходят к Заказчику после полной оплаты."
+        )
+    else:
+        merged["ip_transfer_clause"] = "Порядок перехода прав определяется дополнительным соглашением Сторон."
+
+    merged["access_transfer_clause"] = (
+        "Доступы и учетные данные передаются Заказчику по завершении проекта."
+        if project_characteristics.get("access_transfer_required")
+        else "Передача доступов отдельно не требуется."
+    )
+
+    return merged
+
+
+def validate_template_coverage(template_text: str, context: dict) -> None:
+    """Ensure all template placeholders are provided by merged context."""
+    required_vars = extract_template_variables(template_text)
+    missing = sorted(name for name in required_vars if name not in context)
+    if missing:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Template placeholders do not match available payload/LLM fields. "
+                f"Missing variables: {missing}"
+            ),
+        )
+
+
 def render_template(template_text: str, context: dict) -> str:
     rendered = template_text
 
@@ -397,13 +449,13 @@ def generate_contract(data: ContractData):
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    context = build_context(payload)
-
     project_characteristics = generate_project_characteristics(payload.get("project_description", ""))
+    context = enrich_context_with_project_characteristics(
+        build_context(payload),
+        project_characteristics,
+    )
 
-    required_vars = extract_template_variables(template_text)
-    for var_name in required_vars:
-        context.setdefault(var_name, "")
+    validate_template_coverage(template_text, context)
 
     rendered = render_template(template_text, context)
 
