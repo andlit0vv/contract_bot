@@ -379,22 +379,61 @@ def extract_docx_template_variables(document: Document) -> set[str]:
 
 
 def render_docx_template(document: Document, context: dict) -> None:
-    for container in iter_docx_text_containers(document):
-        text = container.text
-        if "{{" not in text and "{%" not in text:
+    _render_paragraph_loop_blocks(document.paragraphs, context)
+
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                _render_paragraph_loop_blocks(cell.paragraphs, context)
+
+
+def _render_paragraph_loop_blocks(paragraphs, context: dict) -> None:
+    start_re = re.compile(r"\{%\s*for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*%\}")
+    end_re = re.compile(r"\{%\s*endfor\s*%\}")
+
+    i = 0
+    while i < len(paragraphs):
+        text = paragraphs[i].text
+        if "{%" not in text:
+            paragraphs[i].text = render_template(text, context)
+            i += 1
             continue
 
-        rendered = render_template(text, context)
-    variable_pattern = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
-
-    for container in iter_docx_text_containers(document):
-        text = container.text
-        if "{{" not in text:
+        start_match = start_re.search(text)
+        if not start_match:
+            paragraphs[i].text = render_template(text, context)
+            i += 1
             continue
 
-        rendered = variable_pattern.sub(lambda m: str(context.get(m.group(1), "")), text)
-        if rendered != text:
-            container.text = rendered
+        loop_var = start_match.group(1)
+        iterable_name = start_match.group(2)
+        iterable = context.get(iterable_name, [])
+        if not isinstance(iterable, list):
+            iterable = []
+
+        end_index = i
+        while end_index < len(paragraphs) and not end_re.search(paragraphs[end_index].text):
+            end_index += 1
+
+        if end_index >= len(paragraphs):
+            paragraphs[i].text = render_template(text, context)
+            i += 1
+            continue
+
+        block_lines = [paragraphs[idx].text for idx in range(i, end_index + 1)]
+        block_lines[0] = start_re.sub("", block_lines[0], count=1)
+        block_lines[-1] = end_re.sub("", block_lines[-1], count=1)
+        block_template = "\n".join(block_lines).strip("\n")
+
+        rendered_chunks = []
+        for value in iterable:
+            rendered_chunks.append(render_template(block_template, {**context, loop_var: value}))
+        paragraphs[i].text = "\n".join(chunk for chunk in rendered_chunks if chunk)
+
+        for clear_idx in range(i + 1, end_index + 1):
+            paragraphs[clear_idx].text = ""
+
+        i = end_index + 1
 
 
 def render_template(template_text: str, context: dict) -> str:
