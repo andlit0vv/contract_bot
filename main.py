@@ -306,7 +306,17 @@ def enrich_context_with_project_characteristics(context: dict, project_character
 def validate_template_coverage(template_text: str, context: dict) -> None:
     """Ensure all template placeholders are provided by merged context."""
     required_vars = extract_template_variables(template_text)
-    missing = sorted(name for name in required_vars if name not in context)
+
+    # Loop variables (e.g. {{ item }} in {% for item in work_scope_items %})
+    # are local to loop blocks and must not be required in top-level context.
+    loop_vars = set(
+        re.findall(
+            r"\{%\s*for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+[a-zA-Z_][a-zA-Z0-9_]*\s*%\}",
+            template_text,
+        )
+    )
+
+    missing = sorted(name for name in required_vars if name not in context and name not in loop_vars)
     if missing:
         raise HTTPException(
             status_code=500,
