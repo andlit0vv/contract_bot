@@ -6,15 +6,17 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from openai import OpenAI
 from pydantic import BaseModel
+from docx import Document
 
 from validation import ValidationError, parse_and_validate_project_json
 
 app = FastAPI()
 load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATE_PATH = BASE_DIR / "agreement_clean.txt"
-OUTPUT_PATH = BASE_DIR / "agreement_filled.txt"
+TEMPLATE_PATH = BASE_DIR / "contract_template_demo.docx"
+OUTPUT_PATH = BASE_DIR / "contractfinal.docx"
 PROJECT_JSON_PATH = BASE_DIR / "project_characteristics.json"
+UNUSED_FIELDS_PATH = BASE_DIR / "contract_unused_fields.json"
 
 print(os.getenv("OPENAI_API_KEY"))
 OPENAI_MODEL = "gpt-5-mini"
@@ -303,20 +305,18 @@ def enrich_context_with_project_characteristics(context: dict, project_character
     return merged
 
 
-def validate_template_coverage(template_text: str, context: dict) -> None:
-    """Ensure all template placeholders are provided by merged context."""
-    required_vars = extract_template_variables(template_text)
-
-    # Loop variables (e.g. {{ item }} in {% for item in work_scope_items %})
-    # are local to loop blocks and must not be required in top-level context.
-    loop_vars = set(
+def extract_loop_variables(template_text: str) -> set[str]:
+    return set(
         re.findall(
             r"\{%\s*for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+[a-zA-Z_][a-zA-Z0-9_]*\s*%\}",
             template_text,
         )
     )
 
-    missing = sorted(name for name in required_vars if name not in context and name not in loop_vars)
+
+def validate_template_coverage(template_vars: set[str], context: dict, loop_vars: set[str]) -> None:
+    """Ensure all template placeholders are provided by merged context."""
+    missing = sorted(name for name in template_vars if name not in context and name not in loop_vars)
     if missing:
         raise HTTPException(
             status_code=500,
@@ -357,6 +357,35 @@ def validate_llm_template_alignment(template_text: str) -> None:
                 + ", ".join(f"{old} -> {new}" for old, new in sorted(alias_errors.items()))
             ),
         )
+
+
+def iter_docx_text_containers(document: Document):
+    for paragraph in document.paragraphs:
+        yield paragraph
+
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    yield paragraph
+
+
+def extract_docx_template_variables(document: Document) -> set[str]:
+    vars_found: set[str] = set()
+    for container in iter_docx_text_containers(document):
+        vars_found.update(extract_template_variables(container.text))
+    return vars_found
+
+
+def render_docx_template(document: Document, context: dict) -> None:
+    for container in iter_docx_text_containers(document):
+        text = container.text
+        if "{{" not in text and "{%" not in text:
+            continue
+
+        rendered = render_template(text, context)
+        if rendered != text:
+            container.text = rendered
 
 
 def render_template(template_text: str, context: dict) -> str:
@@ -480,10 +509,13 @@ def generate_contract(data: ContractData):
         raise HTTPException(status_code=500, detail="Template not found")
 
     try:
-        template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
-    except OSError as exc:
+        document = Document(TEMPLATE_PATH)
+    except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+    template_text = "\n".join(container.text for container in iter_docx_text_containers(document))
+    template_vars = extract_docx_template_variables(document)
+    loop_vars = extract_loop_variables(template_text)
     validate_llm_template_alignment(template_text)
 
     project_characteristics = generate_project_characteristics(payload.get("project_description", ""))
@@ -492,23 +524,40 @@ def generate_contract(data: ContractData):
         project_characteristics,
     )
 
-    validate_template_coverage(template_text, context)
+    validate_template_coverage(template_vars, context, loop_vars)
+    render_docx_template(document, context)
 
-    rendered = render_template(template_text, context)
+    unused_context_keys = sorted(key for key in context.keys() if key not in template_vars)
+    unused_context_data = {key: context[key] for key in unused_context_keys}
 
     try:
-        OUTPUT_PATH.write_text(rendered, encoding="utf-8")
+        document.save(OUTPUT_PATH)
         PROJECT_JSON_PATH.write_text(
             json.dumps(project_characteristics, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        UNUSED_FIELDS_PATH.write_text(
+            json.dumps(unused_context_data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
     except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+    warning_message = (
+        "Часть переменных не использована в DOCX шаблоне. "
+        "Они сохранены в отдельный JSON файл."
+        if unused_context_keys
+        else ""
+    )
+
     return {
         "status": "ok",
         "output_file": OUTPUT_PATH.name,
         "project_json_file": PROJECT_JSON_PATH.name,
+        "unused_fields_file": UNUSED_FIELDS_PATH.name,
+        "unused_context_keys": unused_context_keys,
+        "unused_context_warning": bool(unused_context_keys),
+        "warning_message": warning_message,
         "morphology": "disabled",
         "project_characteristics": project_characteristics,
     }
