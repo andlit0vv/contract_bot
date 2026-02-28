@@ -1,0 +1,44 @@
+{
+  "project_summary": "Разработка мобильного приложения для доставки еды из ресторанов",
+  "product_type": "mobile application development",
+  "work_scope_items": [
+    "Анализ требований и прототипирование",
+    "Дизайн UI/UX",
+    "Разработка мобильного приложения (iOS и Android)",
+    "Разработка серверной части и API",
+    "Интеграция с платёжными сервисами и партнёрскими API ресторанов",
+    "Тестирование и приёмочное тестирование",
+    "Развёртывание и передача прав доступа",
+    "Поддержка в период гарантийного обслуживания"
+  ],
+  "total_duration_working_days": 120,
+  "stages_count": 4,
+  "stages": [
+    {
+      "name": "Анализ и дизайн",
+      "duration_working_days": 20,
+      "payment_percent": 20
+    },
+    {
+      "name": "Разработка",
+      "duration_working_days": 70,
+      "payment_percent": 50
+    },
+    {
+      "name": "Тестирование и исправления",
+      "duration_working_days": 20,
+      "payment_percent": 20
+    },
+    {
+      "name": "Развёртывание и передача",
+      "duration_working_days": 10,
+      "payment_percent": 10
+    }
+  ],
+  "prepayment_percent": 40,
+  "ip_transfer_model": "exclusive_transfer",
+  "access_transfer_required": true,
+  "penalty_percent_per_day": 0.2,
+  "penalty_cap_percent": 10,
+  "warranty_claim_window_months": 3
+}
