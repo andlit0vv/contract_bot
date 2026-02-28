@@ -15,7 +15,7 @@ TEMPLATE_PATH = BASE_DIR / "agreement_clean.txt"
 OUTPUT_PATH = BASE_DIR / "agreement_filled.txt"
 
 OPENAI_MODEL = "gpt-5-mini"
-OPENAI_MAX_RETRIES = 1
+OPENAI_MAX_RETRIES = 3
 PROJECT_FACTS = """Reference characteristics from contract template:
 - Product type: mobile application development.
 - Total duration: 110 working days from prepayment.
