@@ -305,6 +305,18 @@ def enrich_context_with_project_characteristics(context: dict, project_character
     return merged
 
 
+def extract_loop_variables(template_text: str) -> set[str]:
+    return set(
+        re.findall(
+            r"\{%\s*for\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+in\s+[a-zA-Z_][a-zA-Z0-9_]*\s*%\}",
+            template_text,
+        )
+    )
+
+
+def validate_template_coverage(template_vars: set[str], context: dict, loop_vars: set[str]) -> None:
+    """Ensure all template placeholders are provided by merged context."""
+    missing = sorted(name for name in template_vars if name not in context and name not in loop_vars)
 def validate_template_coverage(template_vars: set[str], context: dict) -> None:
     """Ensure all template placeholders are provided by merged context."""
     missing = sorted(name for name in template_vars if name not in context)
@@ -369,6 +381,12 @@ def extract_docx_template_variables(document: Document) -> set[str]:
 
 
 def render_docx_template(document: Document, context: dict) -> None:
+    for container in iter_docx_text_containers(document):
+        text = container.text
+        if "{{" not in text and "{%" not in text:
+            continue
+
+        rendered = render_template(text, context)
     variable_pattern = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 
     for container in iter_docx_text_containers(document):
@@ -506,6 +524,10 @@ def generate_contract(data: ContractData):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+    template_text = "\n".join(container.text for container in iter_docx_text_containers(document))
+    template_vars = extract_docx_template_variables(document)
+    loop_vars = extract_loop_variables(template_text)
+    validate_llm_template_alignment(template_text)
     template_vars = extract_docx_template_variables(document)
     validate_llm_template_alignment("\n".join(container.text for container in iter_docx_text_containers(document)))
 
@@ -515,6 +537,7 @@ def generate_contract(data: ContractData):
         project_characteristics,
     )
 
+    validate_template_coverage(template_vars, context, loop_vars)
     validate_template_coverage(template_vars, context)
     render_docx_template(document, context)
 
